@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Game Poster Generator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Anton&family=Bangers&family=Cinzel:wght@800;900&family=Creepster&family=Fredoka:wght@700&family=Lilita+One&family=Luckiest+Guy&family=Monoton&family=Orbitron:wght@800;900&family=Pirata+One&family=Press+Start+2P&family=Rye&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="intro">
+        <p class="eyebrow">Poster Forge</p>
+        <h1>Game poster generator</h1>
+        <p class="lede">
+          Upload a background, set the producer and game name, choose a theme
+          color, then export a polished PNG or WebP poster.
+        </p>
+      </section>
+
+      <section class="workspace" aria-label="Poster generator workspace">
+        <form class="panel controls" id="posterForm">
+          <div class="control-accordion">
+            <details class="control-section" data-control-section="background" open>
+              <summary>Background</summary>
+              <div class="control-section-body background-source">
+                <label class="upload-zone" for="backgroundInput">
+                  <span class="upload-kicker">Background image</span>
+                  <strong id="uploadLabel">Drop or choose an image</strong>
+                  <small>JPG, PNG, or WebP works best</small>
+                  <input id="backgroundInput" type="file" accept="image/*" />
+                </label>
+                <div class="url-loader">
+                  <label class="field" for="backgroundUrlInput">
+                    <span>Paste image URL</span>
+                    <input id="backgroundUrlInput" type="url" inputmode="url" placeholder="https://example.com/image.jpg" />
+                  </label>
+                  <button class="secondary compact-button" type="button" id="loadBackgroundUrl">Load URL</button>
+                </div>
+                <p class="source-status" id="backgroundUrlStatus" role="status" aria-live="polite"></p>
+              </div>
+            </details>
+
+            <details class="control-section" data-control-section="producer">
+              <summary>Producer</summary>
+              <div class="control-section-body field-grid">
+                <label class="field">
+                  <span>Producer name</span>
+                  <input id="producerInput" type="text" value="PRAGMATIC PLAY" />
+                </label>
+
+                <label class="field">
+                  <span>Producer font</span>
+                  <select id="producerFontInput">
+                    <option value='"Segoe UI", Arial, sans-serif'>Clean sans</option>
+                    <option value='"Arial Black", Arial, sans-serif'>Heavy block</option>
+                    <option value='Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif'>Condensed poster</option>
+                    <option value='Georgia, "Times New Roman", serif'>Casino serif</option>
+                    <option value='"Trebuchet MS", Verdana, sans-serif'>Rounded sans</option>
+                    <option value='"Courier New", Courier, monospace'>Arcade mono</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>Producer SVG logo</span>
+                  <input id="producerLogoInput" type="file" accept=".svg,image/svg+xml" />
+                  <small id="producerLogoLabel">Optional: replaces producer text</small>
+                  <label class="inline-check">
+                    <input id="overlayProducerInput" type="checkbox" />
+                    <span>Overlay with producer name</span>
+                  </label>
+                </label>
+              </div>
+            </details>
+
+            <details class="control-section" data-control-section="game">
+              <summary>Game</summary>
+              <div class="control-section-body field-grid">
+                <label class="field">
+                  <span>Game name</span>
+                  <input id="gameInput" type="text" value="BLACKJACK" />
+                  <small>Use / to force line breaks, e.g. WANTED DEAD / OR A WILD</small>
+                </label>
+
+                <label class="field">
+                  <span>Title style</span>
+                  <select id="titleStyleInput">
+                    <option value="candy">Rounded candy</option>
+                    <option value="retro">Retro slab</option>
+                    <option value="comic">Comic adventure</option>
+                    <option value="grobold">Grobold cartoon</option>
+                    <option value="olympus">Olympus serif</option>
+                    <option value="western">Western wanted</option>
+                    <option value="neon">Neon arcade</option>
+                    <option value="pixel">Pixel arcade</option>
+                    <option value="pirate">Pirate treasure</option>
+                    <option value="horror">Monster horror</option>
+                    <option value="bubble">Bubble pop</option>
+                    <option value="scifi">Sci-fi chrome</option>
+                    <option value="custom">Custom font</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>Game font</span>
+                  <select id="gameFontInput">
+                    <option value='Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif'>Condensed poster</option>
+                    <option value='Anton, Impact, "Arial Narrow Bold", sans-serif'>Anton</option>
+                    <option value='"Arial Black", Arial, sans-serif'>Heavy block</option>
+                    <option value='Grobold, "Luckiest Guy", "Arial Black", Arial, sans-serif'>Grobold</option>
+                    <option value='"Trebuchet MS", Verdana, sans-serif'>Rounded sans</option>
+                    <option value='Georgia, "Times New Roman", serif'>Casino serif</option>
+                    <option value='"Courier New", Courier, monospace'>Arcade mono</option>
+                    <option value='"Segoe UI", Arial, sans-serif'>Clean sans</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>Theme color</span>
+                  <div class="color-code-row">
+                    <input id="themeInput" type="color" value="#ffc400" />
+                    <input id="themeCodeInput" type="text" value="#ffc400" aria-label="Theme color hex code" />
+                  </div>
+                </label>
+              </div>
+            </details>
+          </div>
+
+          <div class="actions">
+            <label class="field export-filename">
+              <span>Export filename</span>
+              <input id="exportFilenameInput" type="text" placeholder="Use game name if empty" />
+            </label>
+            <button type="button" id="downloadPng">Export PNG</button>
+            <button type="button" id="downloadWebp" class="secondary">Export WebP</button>
+          </div>
+        </form>
+
+        <section class="preview-panel" aria-label="Generated poster preview">
+          <div class="poster-frame">
+            <div class="canvas-editor" id="canvasEditor">
+              <canvas id="posterCanvas" width="427" height="575"></canvas>
+              <div class="transform-overlay" id="backgroundTransformOverlay" hidden aria-label="Selected background image">
+                <button class="resize-handle handle-nw" type="button" data-handle="nw" aria-label="Resize background from top left"></button>
+                <button class="resize-handle handle-ne" type="button" data-handle="ne" aria-label="Resize background from top right"></button>
+                <button class="resize-handle handle-se" type="button" data-handle="se" aria-label="Resize background from bottom right"></button>
+                <button class="resize-handle handle-sw" type="button" data-handle="sw" aria-label="Resize background from bottom left"></button>
+              </div>
+            </div>
+          </div>
+          <div class="image-tool-row">
+            <span>Drag image to move · drag corners to resize</span>
+            <button class="secondary editor-reset" type="button" id="resetBackgroundTransform">Reset image</button>
+          </div>
+          <p class="hint">
+            Exports at 427 x 575. The bottom title area uses stacked transparent
+            gradients, not a flat block, so it keeps the original image visible.
+          </p>
+        </section>
+
+        <section class="advanced" aria-label="Tuning controls">
+          <h2>Tuning controls</h2>
+          <details class="preset-manager producer-preset-manager">
+            <summary>
+              <span>Producer library</span>
+              <span class="preset-count" id="producerPresetCount">0 saved</span>
+            </summary>
+            <div class="preset-manager-body">
+              <div class="preset-picker-row">
+                <select id="producerPresetSelect" aria-label="Saved producer presets">
+                  <option value="">Choose a saved producer</option>
+                </select>
+                <button class="secondary preset-use" type="button" id="applyProducerPreset" disabled>Apply</button>
+                <button class="secondary preset-remove" type="button" id="deleteProducerPreset" disabled aria-label="Delete selected producer">×</button>
+              </div>
+              <div class="preset-save-row">
+                <label class="field" for="producerPresetNameInput">
+                  <span>Save current producer</span>
+                  <input id="producerPresetNameInput" type="text" maxlength="80" placeholder="Producer preset name" />
+                </label>
+                <button type="button" id="saveProducerPreset">Save</button>
+              </div>
+              <p class="preset-status" id="producerPresetStatus" role="status" aria-live="polite"></p>
+            </div>
+          </details>
+          <div class="tuning-tabs" role="tablist" aria-label="Tuning control groups">
+            <button class="tuning-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="gradientTuningPanel" data-tab-target="gradientTuningPanel">Gradient</button>
+            <button class="tuning-tab" type="button" role="tab" aria-selected="false" aria-controls="producerTuningPanel" data-tab-target="producerTuningPanel">Producer</button>
+            <button class="tuning-tab" type="button" role="tab" aria-selected="false" aria-controls="gameTitleTuningPanel" data-tab-target="gameTitleTuningPanel">Game name</button>
+            <button class="tuning-tab" type="button" role="tab" aria-selected="false" aria-controls="globalTuningPanel" data-tab-target="globalTuningPanel">Image</button>
+          </div>
+          <div class="tuning-panel is-active" id="gradientTuningPanel" role="tabpanel">
+            <label class="range-field">
+              <span>Gradient height</span>
+              <input id="gradientHeightInput" type="range" min="30" max="58" value="46" />
+              <input class="range-value" data-range-for="gradientHeightInput" type="text" inputmode="numeric" value="46%" aria-label="Gradient height percentage" />
+            </label>
+            <label class="range-field">
+              <span>Bottom strength</span>
+              <input id="gradientOpacityInput" type="range" min="65" max="100" value="92" />
+              <input class="range-value" data-range-for="gradientOpacityInput" type="text" inputmode="numeric" value="92%" aria-label="Bottom strength percentage" />
+            </label>
+            <label class="range-field">
+              <span>Title glow</span>
+              <input id="glowInput" type="range" min="0" max="100" value="64" />
+              <input class="range-value" data-range-for="glowInput" type="text" inputmode="numeric" value="64%" aria-label="Title glow percentage" />
+            </label>
+          </div>
+          <div class="tuning-panel" id="producerTuningPanel" role="tabpanel" hidden>
+            <label class="range-field">
+              <span>Producer height</span>
+              <input id="producerPositionInput" type="range" min="-30" max="120" value="0" />
+              <input class="range-value" data-range-for="producerPositionInput" type="text" inputmode="numeric" value="0%" aria-label="Producer height percentage" />
+            </label>
+            <label class="range-field">
+              <span>Producer name horizontal</span>
+              <input id="producerHorizontalInput" type="range" min="-160" max="160" value="0" />
+              <input class="range-value" data-range-for="producerHorizontalInput" type="text" inputmode="numeric" value="0%" aria-label="Producer name horizontal percentage" />
+            </label>
+            <label class="range-field">
+              <span>Producer name vertical</span>
+              <input id="producerNameVerticalInput" type="range" min="-80" max="80" value="0" />
+              <input class="range-value" data-range-for="producerNameVerticalInput" type="text" inputmode="numeric" value="0%" aria-label="Producer name vertical percentage" />
+            </label>
+            <label class="range-field">
+              <span>Producer SVG horizontal</span>
+              <input id="producerLogoHorizontalInput" type="range" min="-160" max="160" value="0" />
+              <input class="range-value" data-range-for="producerLogoHorizontalInput" type="text" inputmode="numeric" value="0%" aria-label="Producer SVG horizontal percentage" />
+            </label>
+            <label class="range-field">
+              <span>Producer name size</span>
+              <input id="producerSizeInput" type="range" min="60" max="400" value="100" />
+              <input class="range-value" data-range-for="producerSizeInput" type="text" inputmode="numeric" value="100%" aria-label="Producer name size percentage" />
+            </label>
+            <label class="range-field">
+              <span>Producer SVG size</span>
+              <input id="producerLogoSizeInput" type="range" min="20" max="400" value="100" />
+              <input class="range-value" data-range-for="producerLogoSizeInput" type="text" inputmode="numeric" value="100%" aria-label="Producer SVG size percentage" />
+            </label>
+          </div>
+          <div class="tuning-panel" id="gameTitleTuningPanel" role="tabpanel" hidden>
+            <label class="range-field">
+              <span>Game name outline</span>
+              <input id="titleOutlineInput" type="range" min="0" max="200" value="100" />
+              <input class="range-value" data-range-for="titleOutlineInput" type="text" inputmode="numeric" value="100%" aria-label="Game name outline percentage" />
+            </label>
+            <label class="range-field">
+              <span>Game name height</span>
+              <input id="titlePositionInput" type="range" min="-120" max="90" value="0" />
+              <input class="range-value" data-range-for="titlePositionInput" type="text" inputmode="numeric" value="0%" aria-label="Game name height percentage" />
+            </label>
+            <label class="range-field">
+              <span>Game name horizontal</span>
+              <input id="titleHorizontalInput" type="range" min="-220" max="220" value="0" />
+              <input class="range-value" data-range-for="titleHorizontalInput" type="text" inputmode="numeric" value="0%" aria-label="Game name horizontal percentage" />
+            </label>
+            <label class="range-field">
+              <span>Game name size</span>
+              <input id="titleSizeInput" type="range" min="60" max="300" value="100" />
+              <input class="range-value" data-range-for="titleSizeInput" type="text" inputmode="numeric" value="100%" aria-label="Game name size percentage" />
+            </label>
+            <label class="range-field">
+              <span>Game name spacing</span>
+              <input id="titleSpacingInput" type="range" min="-4" max="24" value="0" />
+              <input class="range-value" data-range-for="titleSpacingInput" data-suffix="px" type="text" inputmode="numeric" value="0px" aria-label="Game name spacing" />
+            </label>
+            <label class="range-field">
+              <span>Game name line 1 size</span>
+              <input id="titleLineOneSizeInput" type="range" min="50" max="300" value="100" />
+              <input class="range-value" data-range-for="titleLineOneSizeInput" type="text" inputmode="numeric" value="100%" aria-label="Game name line 1 size percentage" />
+            </label>
+            <label class="range-field">
+              <span>Game name line 2 size</span>
+              <input id="titleLineTwoSizeInput" type="range" min="50" max="300" value="100" />
+              <input class="range-value" data-range-for="titleLineTwoSizeInput" type="text" inputmode="numeric" value="100%" aria-label="Game name line 2 size percentage" />
+            </label>
+            <label class="range-field">
+              <span>Game name line 3 size</span>
+              <input id="titleLineThreeSizeInput" type="range" min="50" max="300" value="100" />
+              <input class="range-value" data-range-for="titleLineThreeSizeInput" type="text" inputmode="numeric" value="100%" aria-label="Game name line 3 size percentage" />
+            </label>
+            <label class="range-field">
+              <span>Game name line 4 size</span>
+              <input id="titleLineFourSizeInput" type="range" min="50" max="300" value="100" />
+              <input class="range-value" data-range-for="titleLineFourSizeInput" type="text" inputmode="numeric" value="100%" aria-label="Game name line 4 size percentage" />
+            </label>
+            <label class="range-field">
+              <span>Game name row spacing</span>
+              <input id="titleRowSpacingInput" type="range" min="-40" max="100" value="0" />
+              <input class="range-value" data-range-for="titleRowSpacingInput" data-suffix="px" type="text" inputmode="numeric" value="0px" aria-label="Game name row spacing" />
+            </label>
+            <label class="range-field">
+              <span>Game name curve</span>
+              <input id="titleCurveInput" type="range" min="-100" max="100" value="0" />
+              <input class="range-value" data-range-for="titleCurveInput" type="text" inputmode="numeric" value="0%" aria-label="Game name curve percentage" />
+            </label>
+          </div>
+          <div class="tuning-panel" id="globalTuningPanel" role="tabpanel" hidden>
+            <label class="range-field">
+              <span>Contrast</span>
+              <input id="globalContrastInput" type="range" min="0" max="200" value="100" />
+              <input class="range-value" data-range-for="globalContrastInput" type="text" inputmode="numeric" value="100%" aria-label="Image contrast percentage" />
+            </label>
+            <label class="range-field">
+              <span>Saturation</span>
+              <input id="globalSaturationInput" type="range" min="0" max="200" value="100" />
+              <input class="range-value" data-range-for="globalSaturationInput" type="text" inputmode="numeric" value="100%" aria-label="Image saturation percentage" />
+            </label>
+            <label class="range-field">
+              <span>Brightness</span>
+              <input id="globalBrightnessInput" type="range" min="0" max="200" value="100" />
+              <input class="range-value" data-range-for="globalBrightnessInput" type="text" inputmode="numeric" value="100%" aria-label="Image brightness percentage" />
+            </label>
+          </div>
+          <div class="toggle-group" aria-label="Poster layer visibility">
+            <label class="toggle-field">
+              <input id="showProducerInput" type="checkbox" checked />
+              <span>Producer</span>
+            </label>
+            <label class="toggle-field">
+              <input id="showBottomGradientInput" type="checkbox" checked />
+              <span>Gradient</span>
+            </label>
+            <label class="toggle-field">
+              <input id="showGameTitleInput" type="checkbox" checked />
+              <span>Game name</span>
+            </label>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="./script.js"></script>
+  </body>
+</html>
