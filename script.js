@@ -11,6 +11,31 @@ const controls = {
   canvasEditor: document.querySelector("#canvasEditor"),
   backgroundTransformOverlay: document.querySelector("#backgroundTransformOverlay"),
   resetBackgroundTransform: document.querySelector("#resetBackgroundTransform"),
+  editorHint: document.querySelector("#editorHint"),
+  backdropTransformOverlay: document.querySelector("#backdropTransformOverlay"),
+  layerSwitch: document.querySelector(".layer-switch"),
+  backdropMode: document.querySelector("#backdropModeInput"),
+  backdropBlur: document.querySelector("#backdropBlurInput"),
+  backdropBlurValue: document.querySelector("#backdropBlurValue"),
+  backdropColor: document.querySelector("#backdropColorInput"),
+  sampleBackdropColor: document.querySelector("#sampleBackdropColor"),
+  backdropPhoto: document.querySelector("#backdropPhotoInput"),
+  backdropPhotoLabel: document.querySelector("#backdropPhotoLabel"),
+  backdropStatus: document.querySelector("#backdropStatus"),
+  toggleCleanup: document.querySelector("#toggleCleanup"),
+  cleanupMask: document.querySelector("#cleanupMaskCanvas"),
+  cleanupBar: document.querySelector("#cleanupBar"),
+  cleanupBrush: document.querySelector("#cleanupBrushInput"),
+  cleanupBrushValue: document.querySelector("#cleanupBrushValue"),
+  applyCleanup: document.querySelector("#applyCleanup"),
+  clearCleanupMask: document.querySelector("#clearCleanupMask"),
+  undoCleanup: document.querySelector("#undoCleanup"),
+  cleanupStatus: document.querySelector("#cleanupStatus"),
+  aiPrompt: document.querySelector("#aiPromptInput"),
+  aiQuality: document.querySelector("#aiQualityInput"),
+  runAiCleanup: document.querySelector("#runAiCleanup"),
+  aiCleanupStatus: document.querySelector("#aiCleanupStatus"),
+  aiCleanupSection: document.querySelector(".ai-cleanup"),
   producer: document.querySelector("#producerInput"),
   producerFont: document.querySelector("#producerFontInput"),
   producerLogo: document.querySelector("#producerLogoInput"),
@@ -118,6 +143,9 @@ const producerLogoCache = {
   key: "gamePosterGeneratorProducerLogo",
   ttl: settingsCache.ttl,
 };
+
+const producerLogoMaxDimension = 1024;
+const producerLogoMaxDataUrlLength = 1.4 * 1024 * 1024;
 
 const tuningTabCache = {
   key: "gamePosterGeneratorActiveTuningTab",
@@ -448,11 +476,93 @@ function getCoverTransform(image) {
   };
 }
 
-function resetBackgroundTransform() {
-  if (!poster.image) return;
+function resetLayerTransform(name) {
+  const layer = editorLayers[name];
+  const source = layer.getSource();
+  if (!source) return;
 
-  poster.imageTransform = getCoverTransform(poster.image);
+  layer.setTransform(getCoverTransform(source));
   drawPoster();
+}
+
+// A Gaussian tail reaches about three standard deviations, so the blurred copy overshoots
+// the poster by three times the radius to keep its faded edge out of frame.
+const backdropBlurBleed = 3;
+
+// The backdrop is its own layer under the background image: it fills whatever the image
+// does not cover once you shrink or move the image to centre the subject.
+const backdrop = {
+  image: null,
+  imageTransform: null,
+  blurSource: null,
+};
+
+// Blurring a poster sized copy keeps the cost off the original resolution image.
+function getBackdropBlurSource() {
+  if (backdrop.blurSource) return backdrop.blurSource;
+  if (!poster.image) return null;
+
+  const source = document.createElement("canvas");
+  source.width = poster.width;
+  source.height = poster.height;
+  const cover = getCoverTransform(poster.image);
+  source
+    .getContext("2d")
+    .drawImage(poster.image, cover.x, cover.y, cover.width, cover.height);
+  backdrop.blurSource = source;
+
+  return source;
+}
+
+function invalidateBackdropBlur() {
+  backdrop.blurSource = null;
+}
+
+function drawBackdrop() {
+  const mode = controls.backdropMode.value;
+
+  if (mode === "color") {
+    ctx.fillStyle = controls.backdropColor.value;
+    ctx.fillRect(0, 0, poster.width, poster.height);
+    return true;
+  }
+
+  if (mode === "photo") {
+    if (!backdrop.image) return false;
+
+    if (!backdrop.imageTransform) {
+      backdrop.imageTransform = getCoverTransform(backdrop.image);
+    }
+
+    // The colour doubles as a base so a photo pulled away from an edge still exports opaque.
+    ctx.fillStyle = controls.backdropColor.value;
+    ctx.fillRect(0, 0, poster.width, poster.height);
+    const { x, y, width, height } = backdrop.imageTransform;
+    ctx.drawImage(backdrop.image, x, y, width, height);
+    return true;
+  }
+
+  if (mode === "blur") {
+    const source = getBackdropBlurSource();
+    if (!source) return false;
+
+    const radius = parseControlNumber(controls.backdropBlur);
+    // A blur fades the alpha at the edges of whatever it draws, so lay down an opaque copy
+    // first and let the blurred copy overshoot the poster on every side.
+    ctx.drawImage(source, 0, 0, poster.width, poster.height);
+
+    if (radius > 0) {
+      const bleed = radius * backdropBlurBleed;
+      ctx.save();
+      ctx.filter = `blur(${radius}px)`;
+      ctx.drawImage(source, -bleed, -bleed, poster.width + bleed * 2, poster.height + bleed * 2);
+      ctx.restore();
+    }
+
+    return true;
+  }
+
+  return false;
 }
 
 function drawBackgroundImage(image) {
@@ -839,9 +949,11 @@ function drawGameTitle() {
 function drawPoster() {
   ctx.clearRect(0, 0, poster.width, poster.height);
 
+  const backdropDrawn = drawBackdrop();
+
   if (poster.image) {
     drawBackgroundImage(poster.image);
-  } else {
+  } else if (!backdropDrawn) {
     drawPlaceholderBackground();
   }
 
@@ -858,25 +970,52 @@ function drawPoster() {
     drawGameTitle();
   }
 
-  updateBackgroundTransformOverlay();
+  updateTransformOverlays();
 }
 
-function updateBackgroundTransformOverlay() {
-  const overlay = controls.backgroundTransformOverlay;
-  const transform = poster.imageTransform;
+const editorLayers = {
+  image: {
+    overlay: controls.backgroundTransformOverlay,
+    getSource: () => poster.image,
+    getTransform: () => poster.imageTransform,
+    setTransform: (transform) => {
+      poster.imageTransform = transform;
+    },
+  },
+  backdrop: {
+    overlay: controls.backdropTransformOverlay,
+    getSource: () => (controls.backdropMode.value === "photo" ? backdrop.image : null),
+    getTransform: () => backdrop.imageTransform,
+    setTransform: (transform) => {
+      backdrop.imageTransform = transform;
+    },
+  },
+};
 
-  if (!poster.image || !transform || !controls.canvasEditor.clientWidth) {
-    overlay.hidden = true;
-    return;
-  }
+let activeEditorLayer = "image";
 
-  const scaleX = controls.canvasEditor.clientWidth / poster.width;
+function updateTransformOverlays() {
+  const editorWidth = controls.canvasEditor.clientWidth;
+  const scaleX = editorWidth / poster.width;
   const scaleY = controls.canvasEditor.clientHeight / poster.height;
-  overlay.hidden = false;
-  overlay.style.left = `${transform.x * scaleX}px`;
-  overlay.style.top = `${transform.y * scaleY}px`;
-  overlay.style.width = `${transform.width * scaleX}px`;
-  overlay.style.height = `${transform.height * scaleY}px`;
+
+  Object.entries(editorLayers).forEach(([name, layer]) => {
+    const transform = layer.getTransform();
+    const isActive = name === activeEditorLayer && !backgroundEdit.cleanupActive;
+
+    if (!layer.getSource() || !transform || !editorWidth || !isActive) {
+      layer.overlay.hidden = true;
+      return;
+    }
+
+    layer.overlay.hidden = false;
+    layer.overlay.style.left = `${transform.x * scaleX}px`;
+    layer.overlay.style.top = `${transform.y * scaleY}px`;
+    layer.overlay.style.width = `${transform.width * scaleX}px`;
+    layer.overlay.style.height = `${transform.height * scaleY}px`;
+  });
+
+  syncCleanupMaskPlacement();
 }
 
 function getEditorPoint(event) {
@@ -888,83 +1027,912 @@ function getEditorPoint(event) {
   };
 }
 
-let backgroundTransformDrag = null;
+function getResizedTransform(start, handle, point) {
+  const corners = {
+    nw: { anchorX: start.x + start.width, anchorY: start.y + start.height, signX: -1, signY: -1 },
+    ne: { anchorX: start.x, anchorY: start.y + start.height, signX: 1, signY: -1 },
+    se: { anchorX: start.x, anchorY: start.y, signX: 1, signY: 1 },
+    sw: { anchorX: start.x + start.width, anchorY: start.y, signX: -1, signY: 1 },
+  };
+  const corner = corners[handle];
+  const startVectorX = corner.signX * start.width;
+  const startVectorY = corner.signY * start.height;
+  const currentVectorX = point.x - corner.anchorX;
+  const currentVectorY = point.y - corner.anchorY;
+  const projectedScale =
+    (currentVectorX * startVectorX + currentVectorY * startVectorY) /
+    (start.width ** 2 + start.height ** 2);
+  const scale = Math.max(0.08, Math.min(20, projectedScale));
+  const width = start.width * scale;
+  const height = start.height * scale;
 
-controls.backgroundTransformOverlay.addEventListener("pointerdown", (event) => {
-  if (!poster.imageTransform || event.button !== 0) return;
+  return {
+    x: corner.signX > 0 ? corner.anchorX : corner.anchorX - width,
+    y: corner.signY > 0 ? corner.anchorY : corner.anchorY - height,
+    width,
+    height,
+  };
+}
 
-  event.preventDefault();
-  const point = getEditorPoint(event);
-  const handle = event.target.closest("[data-handle]")?.dataset.handle || null;
-  const start = { ...poster.imageTransform };
+function wireTransformOverlay(layer) {
+  let drag = null;
 
-  backgroundTransformDrag = {
-    pointerId: event.pointerId,
-    action: handle ? "resize" : "move",
-    handle,
-    point,
-    start,
+  layer.overlay.addEventListener("pointerdown", (event) => {
+    if (!layer.getTransform() || event.button !== 0) return;
+
+    event.preventDefault();
+    const handle = event.target.closest("[data-handle]")?.dataset.handle || null;
+
+    drag = {
+      pointerId: event.pointerId,
+      handle,
+      point: getEditorPoint(event),
+      start: { ...layer.getTransform() },
+    };
+
+    layer.overlay.setPointerCapture(event.pointerId);
+  });
+
+  layer.overlay.addEventListener("pointermove", (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    event.preventDefault();
+    const point = getEditorPoint(event);
+    const { handle, start } = drag;
+
+    layer.setTransform(
+      handle
+        ? getResizedTransform(start, handle, point)
+        : {
+            ...start,
+            x: start.x + point.x - drag.point.x,
+            y: start.y + point.y - drag.point.y,
+          },
+    );
+    drawPoster();
+  });
+
+  const finishDrag = (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    drag = null;
+    if (layer.overlay.hasPointerCapture(event.pointerId)) {
+      layer.overlay.releasePointerCapture(event.pointerId);
+    }
   };
 
-  controls.backgroundTransformOverlay.setPointerCapture(event.pointerId);
+  layer.overlay.addEventListener("pointerup", finishDrag);
+  layer.overlay.addEventListener("pointercancel", finishDrag);
+}
+
+Object.values(editorLayers).forEach(wireTransformOverlay);
+
+controls.resetBackgroundTransform.addEventListener("click", () => {
+  resetLayerTransform(activeEditorLayer);
 });
+window.addEventListener("resize", updateTransformOverlays);
 
-controls.backgroundTransformOverlay.addEventListener("pointermove", (event) => {
-  if (!backgroundTransformDrag || backgroundTransformDrag.pointerId !== event.pointerId) return;
+function setBackdropStatus(message = "", isError = false) {
+  controls.backdropStatus.textContent = message;
+  controls.backdropStatus.classList.toggle("is-error", isError);
+}
 
-  event.preventDefault();
-  const point = getEditorPoint(event);
-  const { action, handle, start } = backgroundTransformDrag;
+function setActiveEditorLayer(name) {
+  activeEditorLayer = editorLayers[name] ? name : "image";
+  controls.resetBackgroundTransform.textContent =
+    activeEditorLayer === "backdrop" ? "Reset backdrop" : "Reset image";
+  controls.layerSwitch.querySelectorAll("[data-layer]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.layer === activeEditorLayer);
+  });
+  updateTransformOverlays();
+}
 
-  if (action === "move") {
-    poster.imageTransform = {
-      ...start,
-      x: start.x + point.x - backgroundTransformDrag.point.x,
-      y: start.y + point.y - backgroundTransformDrag.point.y,
-    };
+function syncBackdropControls() {
+  const mode = controls.backdropMode.value;
+  const canEditBackdrop = mode === "photo" && Boolean(backdrop.image);
+  const backdropButton = controls.layerSwitch.querySelector('[data-layer="backdrop"]');
+
+  controls.backdropBlurValue.value = `${parseControlNumber(controls.backdropBlur)} px`;
+  document.querySelectorAll("[data-backdrop-mode]").forEach((field) => {
+    field.hidden = !field.dataset.backdropMode.split(" ").includes(mode);
+  });
+
+  backdropButton.disabled = !canEditBackdrop;
+  if (!canEditBackdrop && activeEditorLayer === "backdrop") {
+    setActiveEditorLayer("image");
   } else {
-    const corners = {
-      nw: { anchorX: start.x + start.width, anchorY: start.y + start.height, signX: -1, signY: -1 },
-      ne: { anchorX: start.x, anchorY: start.y + start.height, signX: 1, signY: -1 },
-      se: { anchorX: start.x, anchorY: start.y, signX: 1, signY: 1 },
-      sw: { anchorX: start.x + start.width, anchorY: start.y, signX: -1, signY: 1 },
-    };
-    const corner = corners[handle];
-    const startVectorX = corner.signX * start.width;
-    const startVectorY = corner.signY * start.height;
-    const currentVectorX = point.x - corner.anchorX;
-    const currentVectorY = point.y - corner.anchorY;
-    const projectedScale =
-      (currentVectorX * startVectorX + currentVectorY * startVectorY) /
-      (start.width ** 2 + start.height ** 2);
-    const scale = Math.max(0.08, Math.min(20, projectedScale));
-    const width = start.width * scale;
-    const height = start.height * scale;
-
-    poster.imageTransform = {
-      x: corner.signX > 0 ? corner.anchorX : corner.anchorX - width,
-      y: corner.signY > 0 ? corner.anchorY : corner.anchorY - height,
-      width,
-      height,
-    };
-  }
-
-  drawPoster();
-});
-
-function finishBackgroundTransform(event) {
-  if (!backgroundTransformDrag || backgroundTransformDrag.pointerId !== event.pointerId) return;
-
-  backgroundTransformDrag = null;
-  if (controls.backgroundTransformOverlay.hasPointerCapture(event.pointerId)) {
-    controls.backgroundTransformOverlay.releasePointerCapture(event.pointerId);
+    updateTransformOverlays();
   }
 }
 
-controls.backgroundTransformOverlay.addEventListener("pointerup", finishBackgroundTransform);
-controls.backgroundTransformOverlay.addEventListener("pointercancel", finishBackgroundTransform);
-controls.resetBackgroundTransform.addEventListener("click", resetBackgroundTransform);
-window.addEventListener("resize", updateBackgroundTransformOverlay);
+controls.layerSwitch.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-layer]");
+  if (!button || button.disabled) return;
+
+  if (backgroundEdit.cleanupActive) {
+    setCleanupMode(false);
+  }
+
+  setActiveEditorLayer(button.dataset.layer);
+});
+
+controls.backdropMode.addEventListener("change", () => {
+  syncBackdropControls();
+  drawPoster();
+
+  if (controls.backdropMode.value === "photo" && !backdrop.image) {
+    setBackdropStatus("Import a photo to use as the backdrop.");
+  } else {
+    setBackdropStatus("");
+  }
+});
+
+controls.backdropBlur.addEventListener("input", () => {
+  controls.backdropBlurValue.value = `${parseControlNumber(controls.backdropBlur)} px`;
+  drawPoster();
+});
+
+controls.backdropColor.addEventListener("input", drawPoster);
+
+controls.sampleBackdropColor.addEventListener("click", () => {
+  if (!poster.image) {
+    setBackdropStatus("Load a background image first.", true);
+    return;
+  }
+
+  // Averaging the border ring gives a colour that meets the image edge without a hard seam.
+  const probeSize = 24;
+  const probe = document.createElement("canvas");
+  probe.width = probeSize;
+  probe.height = probeSize;
+  const probeContext = probe.getContext("2d", { willReadFrequently: true });
+  probeContext.drawImage(poster.image, 0, 0, probeSize, probeSize);
+
+  let pixels;
+  try {
+    pixels = probeContext.getImageData(0, 0, probeSize, probeSize).data;
+  } catch (error) {
+    setBackdropStatus("This image blocks pixel access. Upload the file instead of loading a URL.", true);
+    return;
+  }
+
+  const totals = [0, 0, 0];
+  let samples = 0;
+
+  for (let y = 0; y < probeSize; y += 1) {
+    for (let x = 0; x < probeSize; x += 1) {
+      if (x !== 0 && y !== 0 && x !== probeSize - 1 && y !== probeSize - 1) continue;
+
+      const offset = (y * probeSize + x) * 4;
+      totals[0] += pixels[offset];
+      totals[1] += pixels[offset + 1];
+      totals[2] += pixels[offset + 2];
+      samples += 1;
+    }
+  }
+
+  controls.backdropColor.value = `#${totals
+    .map((total) =>
+      Math.round(total / samples)
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+
+  if (controls.backdropMode.value !== "photo") {
+    controls.backdropMode.value = "color";
+  }
+
+  syncBackdropControls();
+  drawPoster();
+  setBackdropStatus("Colour sampled from the image edges.");
+});
+
+controls.backdropPhoto.addEventListener("change", (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  if (!file.type.startsWith("image/")) {
+    setBackdropStatus("The selected file is not an image.", true);
+    return;
+  }
+
+  const image = new Image();
+  const url = URL.createObjectURL(file);
+
+  image.onload = () => {
+    URL.revokeObjectURL(url);
+    backdrop.image = image;
+    backdrop.imageTransform = getCoverTransform(image);
+    controls.backdropPhotoLabel.textContent = file.name;
+    controls.backdropMode.value = "photo";
+    syncBackdropControls();
+    setActiveEditorLayer("backdrop");
+    drawPoster();
+    setBackdropStatus("Backdrop photo ready. Drag it in the preview to position it.");
+  };
+
+  image.onerror = () => {
+    URL.revokeObjectURL(url);
+    setBackdropStatus("That photo could not be loaded.", true);
+  };
+
+  image.src = url;
+});
+
+const inpaintRadius = 5;
+const inpaintMaskDilation = 2;
+const inpaintKnown = 0;
+const inpaintBand = 1;
+const inpaintInside = 2;
+const inpaintUnreachable = 1e6;
+
+function createMinHeap() {
+  return { keys: [], values: [] };
+}
+
+function heapPush(heap, key, value) {
+  const { keys, values } = heap;
+  let index = keys.length;
+  keys.push(key);
+  values.push(value);
+
+  while (index > 0) {
+    const parent = (index - 1) >> 1;
+    if (keys[parent] <= keys[index]) break;
+
+    const parentKey = keys[parent];
+    const parentValue = values[parent];
+    keys[parent] = keys[index];
+    values[parent] = values[index];
+    keys[index] = parentKey;
+    values[index] = parentValue;
+    index = parent;
+  }
+}
+
+function heapPop(heap) {
+  const { keys, values } = heap;
+  const top = values[0];
+  const lastKey = keys.pop();
+  const lastValue = values.pop();
+
+  if (keys.length) {
+    keys[0] = lastKey;
+    values[0] = lastValue;
+    let index = 0;
+
+    for (;;) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let smallest = index;
+
+      if (left < keys.length && keys[left] < keys[smallest]) smallest = left;
+      if (right < keys.length && keys[right] < keys[smallest]) smallest = right;
+      if (smallest === index) break;
+
+      const smallestKey = keys[smallest];
+      const smallestValue = values[smallest];
+      keys[smallest] = keys[index];
+      values[smallest] = values[index];
+      keys[index] = smallestKey;
+      values[index] = smallestValue;
+      index = smallest;
+    }
+  }
+
+  return top;
+}
+
+// Anti-aliased glyph edges leave a halo unless the painted mask covers slightly more than the text.
+function dilateMask(mask, width, height, radius) {
+  if (radius <= 0) return mask;
+
+  const horizontal = new Uint8Array(mask.length);
+
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width;
+
+    for (let x = 0; x < width; x += 1) {
+      const from = Math.max(0, x - radius);
+      const to = Math.min(width - 1, x + radius);
+
+      for (let sample = from; sample <= to; sample += 1) {
+        if (!mask[row + sample]) continue;
+        horizontal[row + x] = 1;
+        break;
+      }
+    }
+  }
+
+  const dilated = new Uint8Array(mask.length);
+
+  for (let x = 0; x < width; x += 1) {
+    for (let y = 0; y < height; y += 1) {
+      const from = Math.max(0, y - radius);
+      const to = Math.min(height - 1, y + radius);
+
+      for (let sample = from; sample <= to; sample += 1) {
+        if (!horizontal[sample * width + x]) continue;
+        dilated[y * width + x] = 1;
+        break;
+      }
+    }
+  }
+
+  return dilated;
+}
+
+// Telea fast marching inpainting: masked pixels are filled from the known pixels around them,
+// walking inward from the hole boundary so structure and gradients carry across the gap.
+function inpaintMaskedPixels(imageData, mask, width, height) {
+  const total = width * height;
+  const data = imageData.data;
+  const flags = new Uint8Array(total);
+  const distances = new Float32Array(total);
+  const heap = createMinHeap();
+  const intensitySums = new Float64Array(3);
+  const slopeSumsX = new Float64Array(3);
+  const slopeSumsY = new Float64Array(3);
+
+  for (let index = 0; index < total; index += 1) {
+    if (!mask[index]) continue;
+
+    flags[index] = inpaintInside;
+    distances[index] = inpaintUnreachable;
+  }
+
+  for (let index = 0; index < total; index += 1) {
+    if (flags[index] === inpaintInside) continue;
+
+    const x = index % width;
+    const y = (index - x) / width;
+    const touchesHole =
+      (x > 0 && flags[index - 1] === inpaintInside) ||
+      (x < width - 1 && flags[index + 1] === inpaintInside) ||
+      (y > 0 && flags[index - width] === inpaintInside) ||
+      (y < height - 1 && flags[index + width] === inpaintInside);
+
+    if (!touchesHole) continue;
+
+    flags[index] = inpaintBand;
+    heapPush(heap, 0, index);
+  }
+
+  function solveDistance(x1, y1, x2, y2) {
+    const firstOutside = x1 < 0 || y1 < 0 || x1 >= width || y1 >= height;
+    const secondOutside = x2 < 0 || y2 < 0 || x2 >= width || y2 >= height;
+
+    if (firstOutside && secondOutside) return inpaintUnreachable;
+
+    const firstKnown = !firstOutside && flags[y1 * width + x1] !== inpaintInside;
+    const secondKnown = !secondOutside && flags[y2 * width + x2] !== inpaintInside;
+    const first = firstOutside ? inpaintUnreachable : distances[y1 * width + x1];
+    const second = secondOutside ? inpaintUnreachable : distances[y2 * width + x2];
+
+    if (firstKnown && secondKnown) {
+      const difference = first - second;
+      if (Math.abs(difference) >= 1) return 1 + Math.min(first, second);
+
+      return (first + second + Math.sqrt(2 - difference * difference)) / 2;
+    }
+
+    if (firstKnown) return 1 + first;
+    if (secondKnown) return 1 + second;
+
+    return inpaintUnreachable;
+  }
+
+  function fieldDerivative(x, y, stepX, stepY) {
+    const index = y * width + x;
+    const aheadX = x + stepX;
+    const aheadY = y + stepY;
+    const behindX = x - stepX;
+    const behindY = y - stepY;
+    const aheadInside =
+      aheadX < 0 || aheadY < 0 || aheadX >= width || aheadY >= height
+        ? true
+        : flags[aheadY * width + aheadX] === inpaintInside;
+    const behindInside =
+      behindX < 0 || behindY < 0 || behindX >= width || behindY >= height
+        ? true
+        : flags[behindY * width + behindX] === inpaintInside;
+
+    if (!aheadInside && !behindInside) {
+      return (distances[aheadY * width + aheadX] - distances[behindY * width + behindX]) / 2;
+    }
+
+    if (!aheadInside) return distances[aheadY * width + aheadX] - distances[index];
+    if (!behindInside) return distances[index] - distances[behindY * width + behindX];
+
+    return 0;
+  }
+
+  function paintPixel(x, y) {
+    const index = y * width + x;
+    const normalX = fieldDerivative(x, y, 1, 0);
+    const normalY = fieldDerivative(x, y, 0, 1);
+    const fromY = Math.max(0, y - inpaintRadius);
+    const toY = Math.min(height - 1, y + inpaintRadius);
+    const fromX = Math.max(0, x - inpaintRadius);
+    const toX = Math.min(width - 1, x + inpaintRadius);
+    let weightSum = 0;
+
+    intensitySums.fill(0);
+    slopeSumsX.fill(0);
+    slopeSumsY.fill(0);
+
+    for (let sampleY = fromY; sampleY <= toY; sampleY += 1) {
+      for (let sampleX = fromX; sampleX <= toX; sampleX += 1) {
+        const sampleIndex = sampleY * width + sampleX;
+        if (flags[sampleIndex] === inpaintInside) continue;
+
+        const deltaX = x - sampleX;
+        const deltaY = y - sampleY;
+        const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+        if (!lengthSquared || lengthSquared > inpaintRadius * inpaintRadius) continue;
+
+        const length = Math.sqrt(lengthSquared);
+        const direction = Math.max(
+          Math.abs(deltaX * normalX + deltaY * normalY) / length,
+          1e-6,
+        );
+        const level = 1 / (1 + Math.abs(distances[sampleIndex] - distances[index]));
+        const weight = (direction * level) / (length * lengthSquared);
+        const offset = sampleIndex * 4;
+        const leftKnown = sampleX > 0 && flags[sampleIndex - 1] !== inpaintInside;
+        const rightKnown = sampleX < width - 1 && flags[sampleIndex + 1] !== inpaintInside;
+        const upKnown = sampleY > 0 && flags[sampleIndex - width] !== inpaintInside;
+        const downKnown = sampleY < height - 1 && flags[sampleIndex + width] !== inpaintInside;
+
+        for (let channel = 0; channel < 3; channel += 1) {
+          const value = data[offset + channel];
+          let slopeX = 0;
+          let slopeY = 0;
+
+          if (leftKnown && rightKnown) {
+            slopeX = (data[offset + 4 + channel] - data[offset - 4 + channel]) / 2;
+          } else if (rightKnown) {
+            slopeX = data[offset + 4 + channel] - value;
+          } else if (leftKnown) {
+            slopeX = value - data[offset - 4 + channel];
+          }
+
+          if (upKnown && downKnown) {
+            slopeY = (data[offset + width * 4 + channel] - data[offset - width * 4 + channel]) / 2;
+          } else if (downKnown) {
+            slopeY = data[offset + width * 4 + channel] - value;
+          } else if (upKnown) {
+            slopeY = value - data[offset - width * 4 + channel];
+          }
+
+          intensitySums[channel] += weight * value;
+          slopeSumsX[channel] -= weight * slopeX * deltaX;
+          slopeSumsY[channel] -= weight * slopeY * deltaY;
+        }
+
+        weightSum += weight;
+      }
+    }
+
+    if (!weightSum) return;
+
+    const offset = index * 4;
+
+    for (let channel = 0; channel < 3; channel += 1) {
+      const slopeX = slopeSumsX[channel];
+      const slopeY = slopeSumsY[channel];
+      // The slope correction stays normalised, otherwise it compounds as the front advances
+      // and the channels drift apart into colour banding.
+      const correction =
+        (slopeX + slopeY) / (Math.sqrt(slopeX * slopeX + slopeY * slopeY) + 1e-20);
+
+      data[offset + channel] = intensitySums[channel] / weightSum + correction;
+    }
+
+    data[offset + 3] = 255;
+  }
+
+  function advance(x, y) {
+    if (x < 0 || y < 0 || x >= width || y >= height) return;
+
+    const index = y * width + x;
+    if (flags[index] !== inpaintInside) return;
+
+    distances[index] = Math.min(
+      solveDistance(x - 1, y, x, y - 1),
+      solveDistance(x + 1, y, x, y - 1),
+      solveDistance(x - 1, y, x, y + 1),
+      solveDistance(x + 1, y, x, y + 1),
+    );
+    paintPixel(x, y);
+    flags[index] = inpaintBand;
+    heapPush(heap, distances[index], index);
+  }
+
+  while (heap.keys.length) {
+    const index = heapPop(heap);
+    const x = index % width;
+    const y = (index - x) / width;
+
+    flags[index] = inpaintKnown;
+    advance(x - 1, y);
+    advance(x + 1, y);
+    advance(x, y - 1);
+    advance(x, y + 1);
+  }
+}
+
+const backgroundHistoryLimit = 3;
+const cleanupMaskPaint = "#ff3b2f";
+const aiCleanupMaxDimension = 2048;
+
+const backgroundEdit = {
+  workCanvas: null,
+  history: [],
+  strokeBounds: null,
+  stroke: null,
+  cleanupActive: false,
+};
+
+function setCleanupStatus(message = "", isError = false) {
+  controls.cleanupStatus.textContent = message;
+  controls.cleanupStatus.classList.toggle("is-error", isError);
+}
+
+function setAiCleanupStatus(message = "", isError = false) {
+  controls.aiCleanupStatus.textContent = message;
+  controls.aiCleanupStatus.classList.toggle("is-error", isError);
+}
+
+// Editing happens on a canvas at the source resolution, so erasing never bakes in the
+// poster gradients or drops the background down to the 427x575 preview size.
+function ensureWorkCanvas() {
+  if (backgroundEdit.workCanvas) return backgroundEdit.workCanvas;
+  if (!poster.image) return null;
+
+  const source = poster.image;
+  const work = document.createElement("canvas");
+  work.width = source.naturalWidth || source.width;
+  work.height = source.naturalHeight || source.height;
+  work.getContext("2d", { willReadFrequently: true }).drawImage(source, 0, 0, work.width, work.height);
+  backgroundEdit.workCanvas = work;
+  poster.image = work;
+
+  return work;
+}
+
+function pushBackgroundHistory(work) {
+  const snapshot = document.createElement("canvas");
+  snapshot.width = work.width;
+  snapshot.height = work.height;
+  snapshot.getContext("2d").drawImage(work, 0, 0);
+  backgroundEdit.history.push({ canvas: snapshot, transform: { ...poster.imageTransform } });
+
+  // Source resolution snapshots are heavy, so only the most recent steps are kept.
+  while (backgroundEdit.history.length > backgroundHistoryLimit) {
+    backgroundEdit.history.shift();
+  }
+}
+
+function undoBackgroundEdit() {
+  const previous = backgroundEdit.history.pop();
+
+  if (!previous) {
+    setCleanupStatus("Nothing left to undo.", true);
+    return;
+  }
+
+  backgroundEdit.workCanvas = previous.canvas;
+  poster.image = previous.canvas;
+  poster.imageTransform = previous.transform;
+  invalidateBackdropBlur();
+
+  if (backgroundEdit.cleanupActive) setCleanupMode(true);
+
+  drawPoster();
+  setCleanupStatus("Reverted the last change.");
+}
+
+function resetBackgroundEditState() {
+  if (backgroundEdit.cleanupActive) setCleanupMode(false);
+
+  invalidateBackdropBlur();
+  backgroundEdit.workCanvas = null;
+  backgroundEdit.history = [];
+  backgroundEdit.strokeBounds = null;
+  backgroundEdit.stroke = null;
+}
+
+function syncCleanupMaskPlacement() {
+  if (!backgroundEdit.cleanupActive || !poster.imageTransform) return;
+
+  const scaleX = controls.canvasEditor.clientWidth / poster.width;
+  const scaleY = controls.canvasEditor.clientHeight / poster.height;
+  const { x, y, width, height } = poster.imageTransform;
+  const mask = controls.cleanupMask;
+
+  mask.style.left = `${x * scaleX}px`;
+  mask.style.top = `${y * scaleY}px`;
+  mask.style.width = `${width * scaleX}px`;
+  mask.style.height = `${height * scaleY}px`;
+}
+
+function clearCleanupMask() {
+  const mask = controls.cleanupMask;
+  mask.getContext("2d").clearRect(0, 0, mask.width, mask.height);
+  backgroundEdit.strokeBounds = null;
+}
+
+function setCleanupMode(active) {
+  if (active) {
+    const work = ensureWorkCanvas();
+
+    if (!work) {
+      setBackgroundSourceStatus("Load a background image before erasing.", true);
+      return;
+    }
+
+    controls.cleanupMask.width = work.width;
+    controls.cleanupMask.height = work.height;
+    controls.cleanupMask.hidden = false;
+  } else {
+    controls.cleanupMask.hidden = true;
+  }
+
+  backgroundEdit.cleanupActive = active;
+  backgroundEdit.strokeBounds = null;
+  backgroundEdit.stroke = null;
+  controls.cleanupBar.hidden = !active;
+  controls.toggleCleanup.textContent = active ? "Exit eraser" : "Magic eraser";
+  controls.toggleCleanup.classList.toggle("is-active", active);
+  controls.editorHint.textContent = active
+    ? "Paint over the text, then press Erase"
+    : "Drag image to move · drag corners to resize";
+  setCleanupStatus(active ? "Paint over the text you want gone." : "");
+  updateTransformOverlays();
+}
+
+function getMaskPoint(event) {
+  const mask = controls.cleanupMask;
+  const rect = mask.getBoundingClientRect();
+
+  return {
+    x: ((event.clientX - rect.left) / rect.width) * mask.width,
+    y: ((event.clientY - rect.top) / rect.height) * mask.height,
+    scale: mask.width / rect.width,
+  };
+}
+
+function trackStrokeBounds(x, y, radius) {
+  const bounds = backgroundEdit.strokeBounds || {
+    minX: Infinity,
+    minY: Infinity,
+    maxX: -Infinity,
+    maxY: -Infinity,
+  };
+
+  bounds.minX = Math.min(bounds.minX, x - radius);
+  bounds.minY = Math.min(bounds.minY, y - radius);
+  bounds.maxX = Math.max(bounds.maxX, x + radius);
+  bounds.maxY = Math.max(bounds.maxY, y + radius);
+  backgroundEdit.strokeBounds = bounds;
+}
+
+function getCleanupRegion(work) {
+  const bounds = backgroundEdit.strokeBounds;
+  if (!work || !bounds) return null;
+
+  const padding = inpaintRadius + inpaintMaskDilation + 2;
+  const x = Math.max(0, Math.floor(bounds.minX - padding));
+  const y = Math.max(0, Math.floor(bounds.minY - padding));
+  const right = Math.min(work.width, Math.ceil(bounds.maxX + padding));
+  const bottom = Math.min(work.height, Math.ceil(bounds.maxY + padding));
+
+  if (right <= x || bottom <= y) return null;
+
+  return { x, y, width: right - x, height: bottom - y };
+}
+
+function applyMagicEraser() {
+  const work = backgroundEdit.workCanvas;
+  const region = getCleanupRegion(work);
+
+  if (!region) {
+    setCleanupStatus("Paint over the text you want to remove first.", true);
+    return;
+  }
+
+  const workContext = work.getContext("2d", { willReadFrequently: true });
+  let pixels;
+
+  try {
+    pixels = workContext.getImageData(region.x, region.y, region.width, region.height);
+  } catch (error) {
+    setCleanupStatus("This image blocks pixel access. Upload the file instead of loading a URL.", true);
+    return;
+  }
+
+  const maskPixels = controls.cleanupMask
+    .getContext("2d")
+    .getImageData(region.x, region.y, region.width, region.height);
+  const mask = new Uint8Array(region.width * region.height);
+  let painted = 0;
+
+  for (let index = 0; index < mask.length; index += 1) {
+    if (maskPixels.data[index * 4 + 3] <= 10) continue;
+
+    mask[index] = 1;
+    painted += 1;
+  }
+
+  if (!painted) {
+    setCleanupStatus("Paint over the text you want to remove first.", true);
+    return;
+  }
+
+  pushBackgroundHistory(work);
+  inpaintMaskedPixels(
+    pixels,
+    dilateMask(mask, region.width, region.height, inpaintMaskDilation),
+    region.width,
+    region.height,
+  );
+  workContext.putImageData(pixels, region.x, region.y);
+  clearCleanupMask();
+  invalidateBackdropBlur();
+  drawPoster();
+  setCleanupStatus(`Erased ${painted.toLocaleString()} pixels. Undo restores the previous image.`);
+}
+
+controls.toggleCleanup.addEventListener("click", () => {
+  setCleanupMode(!backgroundEdit.cleanupActive);
+});
+
+controls.cleanupBrush.addEventListener("input", () => {
+  controls.cleanupBrushValue.textContent = `${controls.cleanupBrush.value} px`;
+});
+
+controls.cleanupMask.addEventListener("pointerdown", (event) => {
+  if (!backgroundEdit.cleanupActive || event.button !== 0) return;
+
+  event.preventDefault();
+  const point = getMaskPoint(event);
+  const radius = Math.max(1, (Number(controls.cleanupBrush.value) / 2) * point.scale);
+  const context = controls.cleanupMask.getContext("2d");
+
+  context.fillStyle = cleanupMaskPaint;
+  context.strokeStyle = cleanupMaskPaint;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.lineWidth = radius * 2;
+  context.beginPath();
+  context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+  context.fill();
+
+  backgroundEdit.stroke = { pointerId: event.pointerId, x: point.x, y: point.y, radius };
+  trackStrokeBounds(point.x, point.y, radius);
+  controls.cleanupMask.setPointerCapture(event.pointerId);
+});
+
+controls.cleanupMask.addEventListener("pointermove", (event) => {
+  const stroke = backgroundEdit.stroke;
+  if (!stroke || stroke.pointerId !== event.pointerId) return;
+
+  event.preventDefault();
+  const point = getMaskPoint(event);
+  const context = controls.cleanupMask.getContext("2d");
+
+  context.beginPath();
+  context.moveTo(stroke.x, stroke.y);
+  context.lineTo(point.x, point.y);
+  context.stroke();
+
+  stroke.x = point.x;
+  stroke.y = point.y;
+  trackStrokeBounds(point.x, point.y, stroke.radius);
+});
+
+function finishCleanupStroke(event) {
+  const stroke = backgroundEdit.stroke;
+  if (!stroke || stroke.pointerId !== event.pointerId) return;
+
+  backgroundEdit.stroke = null;
+  if (controls.cleanupMask.hasPointerCapture(event.pointerId)) {
+    controls.cleanupMask.releasePointerCapture(event.pointerId);
+  }
+}
+
+controls.cleanupMask.addEventListener("pointerup", finishCleanupStroke);
+controls.cleanupMask.addEventListener("pointercancel", finishCleanupStroke);
+controls.applyCleanup.addEventListener("click", () => {
+  if (getCleanupRegion(backgroundEdit.workCanvas)) setCleanupStatus("Erasing…");
+
+  // Inpainting a large mask blocks the main thread, so let the status paint first.
+  requestAnimationFrame(() => requestAnimationFrame(applyMagicEraser));
+});
+controls.clearCleanupMask.addEventListener("click", () => {
+  clearCleanupMask();
+  setCleanupStatus("Selection cleared.");
+});
+controls.undoCleanup.addEventListener("click", undoBackgroundEdit);
+
+function replaceBackgroundImage(image, label) {
+  const next = document.createElement("canvas");
+  next.width = image.naturalWidth || image.width;
+  next.height = image.naturalHeight || image.height;
+  next.getContext("2d", { willReadFrequently: true }).drawImage(image, 0, 0);
+  backgroundEdit.workCanvas = next;
+  poster.image = next;
+  poster.imageTransform = getCoverTransform(next);
+  controls.uploadLabel.textContent = label;
+  invalidateBackdropBlur();
+
+  if (backgroundEdit.cleanupActive) setCleanupMode(true);
+
+  drawPoster();
+}
+
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("The redrawn image could not be loaded."));
+    image.src = dataUrl;
+  });
+}
+
+async function runAiCleanup() {
+  const work = ensureWorkCanvas();
+
+  if (!work) {
+    setAiCleanupStatus("Load a background image first.", true);
+    return;
+  }
+
+  const qualityLabel = controls.aiQuality.selectedOptions[0]?.textContent || controls.aiQuality.value;
+  if (!window.confirm(`Redraw this image with GPT at ${qualityLabel}? This calls a paid API.`)) return;
+
+  let imageDataUrl;
+  try {
+    const scale = Math.min(1, aiCleanupMaxDimension / Math.max(work.width, work.height));
+    imageDataUrl = scale === 1 ? work.toDataURL("image/png") : resampleToDataUrl(work, scale);
+  } catch (error) {
+    setAiCleanupStatus("This image blocks pixel access. Upload the file instead of loading a URL.", true);
+    return;
+  }
+
+  controls.aiCleanupSection.classList.add("is-busy");
+  setAiCleanupStatus("Redrawing with GPT. This usually takes 20 to 60 seconds.");
+
+  try {
+    const response = await fetch(apiUrl("api/remove-text"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        imageDataUrl,
+        prompt: controls.aiPrompt.value,
+        quality: controls.aiQuality.value,
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+
+    if (!response.ok || !result.imageDataUrl) {
+      throw new Error(result.error || "The redraw request failed.");
+    }
+
+    const image = await loadImageFromDataUrl(result.imageDataUrl);
+    pushBackgroundHistory(work);
+    replaceBackgroundImage(image, "GPT redraw");
+    setAiCleanupStatus("Redraw ready. Undo in the eraser bar restores the previous image.");
+  } catch (error) {
+    setAiCleanupStatus(error.message, true);
+  } finally {
+    controls.aiCleanupSection.classList.remove("is-busy");
+  }
+}
+
+controls.runAiCleanup.addEventListener("click", runAiCleanup);
 
 function sanitizeExportFileName(value) {
   return value
@@ -1131,6 +2099,7 @@ function setBackgroundSourceStatus(message = "", isError = false) {
 }
 
 function useBackgroundImage(image, label) {
+  resetBackgroundEditState();
   poster.image = image;
   poster.imageTransform = getCoverTransform(image);
   controls.uploadLabel.textContent = label;
@@ -1250,11 +2219,48 @@ controls.producerLogo.addEventListener("change", (event) => {
 function saveProducerLogoFile(file) {
   const reader = new FileReader();
 
-  reader.addEventListener("load", () => {
-    setProducerLogo(reader.result, file.name);
+  reader.addEventListener("load", async () => {
+    const dataUrl =
+      file.type === "image/svg+xml" ? reader.result : await shrinkRasterLogo(reader.result);
+    setProducerLogo(dataUrl, file.name);
   });
 
   reader.readAsDataURL(file);
+}
+
+// Presets travel as JSON, so bitmap logos are downscaled to stay inside the size limit the API enforces.
+function shrinkRasterLogo(dataUrl) {
+  return new Promise((resolve) => {
+    const image = new Image();
+
+    image.onload = () => {
+      let scale = Math.min(1, producerLogoMaxDimension / Math.max(image.width, image.height));
+
+      if (scale === 1 && dataUrl.length <= producerLogoMaxDataUrlLength) {
+        resolve(dataUrl);
+        return;
+      }
+
+      let encoded = resampleToDataUrl(image, scale);
+
+      while (encoded.length > producerLogoMaxDataUrlLength && scale > 0.05) {
+        scale *= 0.75;
+        encoded = resampleToDataUrl(image, scale);
+      }
+
+      resolve(encoded);
+    };
+    image.onerror = () => resolve(dataUrl);
+    image.src = dataUrl;
+  });
+}
+
+function resampleToDataUrl(image, scale) {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/png");
 }
 
 function setProducerLogo(dataUrl, fileName, persist = true) {
@@ -1263,7 +2269,7 @@ function setProducerLogo(dataUrl, fileName, persist = true) {
     poster.producerLogo = image;
     poster.producerLogoDataUrl = dataUrl;
     poster.producerLogoFileName = fileName;
-    controls.producerLogoLabel.textContent = fileName || "Saved SVG logo";
+    controls.producerLogoLabel.textContent = fileName || "Saved logo";
     drawPoster();
   };
   image.onerror = () => {
@@ -1283,7 +2289,7 @@ function setProducerLogo(dataUrl, fileName, persist = true) {
       }),
     );
   } catch (error) {
-    // Large SVGs may exceed localStorage limits, so the app keeps working without persistence.
+    // Large logos may exceed localStorage limits, so the app keeps working without persistence.
   }
 }
 
@@ -1312,7 +2318,7 @@ function loadSavedProducerLogo() {
       return;
     }
 
-    setProducerLogo(cachedLogo.dataUrl, cachedLogo.name || "Saved SVG logo", false);
+    setProducerLogo(cachedLogo.dataUrl, cachedLogo.name || "Saved logo", false);
   } catch (error) {
     clearProducerLogo();
   }
@@ -1430,7 +2436,11 @@ function getProducerSettingsSnapshot() {
 }
 
 // Resolved against the page URL so the app also works when served from a sub-path such as /poster/.
-const producerPresetsEndpoint = new URL("api/producer-presets", document.baseURI).toString();
+function apiUrl(path) {
+  return new URL(path, document.baseURI).toString();
+}
+
+const producerPresetsEndpoint = apiUrl("api/producer-presets");
 
 async function requestProducerPresets(url = producerPresetsEndpoint, options = {}) {
   const response = await fetch(url, options);
@@ -1458,7 +2468,7 @@ function applyProducerPreset(preset) {
   });
 
   if (preset.logo?.dataUrl) {
-    setProducerLogo(preset.logo.dataUrl, preset.logo.fileName || "Saved SVG logo");
+    setProducerLogo(preset.logo.dataUrl, preset.logo.fileName || "Saved logo");
   } else {
     clearProducerLogo();
   }
@@ -1499,7 +2509,7 @@ function renderProducerPresets() {
     const option = document.createElement("option");
     const producerName = preset.settings?.producer || "Logo only";
     option.value = preset.id;
-    option.textContent = `${preset.name} — ${producerName}${preset.logo ? " · SVG" : ""}`;
+    option.textContent = `${preset.name} — ${producerName}${preset.logo ? " · logo" : ""}`;
     controls.producerPresetSelect.append(option);
   });
 
@@ -1552,7 +2562,7 @@ async function saveCurrentProducerPreset() {
     settings: getProducerSettingsSnapshot(),
     logo: poster.producerLogoDataUrl
       ? {
-          fileName: poster.producerLogoFileName || "producer.svg",
+          fileName: poster.producerLogoFileName || "producer-logo",
           dataUrl: poster.producerLogoDataUrl,
         }
       : null,
@@ -1846,6 +2856,7 @@ loadSavedProducerLogo();
 controls.png.addEventListener("click", () => exportPoster("image/png"));
 controls.webp.addEventListener("click", () => exportPoster("image/webp"));
 
+syncBackdropControls();
 drawPoster();
 
 if (document.fonts) {

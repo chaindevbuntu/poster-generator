@@ -43,6 +43,64 @@
                   <button class="secondary compact-button" type="button" id="loadBackgroundUrl">Load URL</button>
                 </div>
                 <p class="source-status" id="backgroundUrlStatus" role="status" aria-live="polite"></p>
+
+                <div class="ai-cleanup">
+                  <span class="upload-kicker">Remove text with AI</span>
+                  <small>Redraws the whole image when the eraser cannot cope. Text on cards, wheels and reels is kept.</small>
+                  <label class="field" for="aiPromptInput">
+                    <span>Instruction</span>
+                    <textarea id="aiPromptInput" rows="2">删除图片里的游戏标题以及厂商名字，在正中间突出主体</textarea>
+                  </label>
+                  <div class="url-loader">
+                    <label class="field" for="aiQualityInput">
+                      <span>Quality</span>
+                      <select id="aiQualityInput">
+                        <option value="low">Low · ~$0.01</option>
+                        <option value="medium" selected>Medium · ~$0.04</option>
+                        <option value="high">High · ~$0.17</option>
+                      </select>
+                    </label>
+                    <button class="compact-button" type="button" id="runAiCleanup">Redraw</button>
+                  </div>
+                  <p class="source-status" id="aiCleanupStatus" role="status" aria-live="polite"></p>
+                </div>
+              </div>
+            </details>
+
+            <details class="control-section" data-control-section="backdrop">
+              <summary>Backdrop layer</summary>
+              <div class="control-section-body field-grid">
+                <small class="backdrop-intro">Sits behind the background image, so shrinking or moving the image never leaves an empty band.</small>
+
+                <label class="field">
+                  <span>Fill mode</span>
+                  <select id="backdropModeInput">
+                    <option value="blur" selected>Blurred copy of the image</option>
+                    <option value="color">Solid colour</option>
+                    <option value="photo">Imported photo</option>
+                    <option value="none">None</option>
+                  </select>
+                </label>
+
+                <label class="slider-field" for="backdropBlurInput" data-backdrop-mode="blur">
+                  <span>Blur</span>
+                  <input id="backdropBlurInput" type="range" min="0" max="80" value="32" />
+                  <output id="backdropBlurValue" for="backdropBlurInput">32 px</output>
+                </label>
+
+                <div class="field" data-backdrop-mode="color photo">
+                  <span>Backdrop colour</span>
+                  <input id="backdropColorInput" type="color" value="#12101c" aria-label="Backdrop colour" />
+                  <button class="secondary compact-button" type="button" id="sampleBackdropColor">Pick from image</button>
+                </div>
+
+                <label class="field" data-backdrop-mode="photo">
+                  <span>Backdrop photo</span>
+                  <input id="backdropPhotoInput" type="file" accept="image/*" />
+                  <small id="backdropPhotoLabel">Position it with the Backdrop handles in the preview</small>
+                </label>
+
+                <p class="source-status" id="backdropStatus" role="status" aria-live="polite"></p>
               </div>
             </details>
 
@@ -67,8 +125,8 @@
                 </label>
 
                 <label class="field">
-                  <span>Producer SVG logo</span>
-                  <input id="producerLogoInput" type="file" accept=".svg,image/svg+xml" />
+                  <span>Producer logo</span>
+                  <input id="producerLogoInput" type="file" accept=".svg,.png,image/svg+xml,image/png" />
                   <small id="producerLogoLabel">Optional: replaces producer text</small>
                   <label class="inline-check">
                     <input id="overlayProducerInput" type="checkbox" />
@@ -145,6 +203,13 @@
           <div class="poster-frame">
             <div class="canvas-editor" id="canvasEditor">
               <canvas id="posterCanvas" width="427" height="575"></canvas>
+              <canvas class="cleanup-mask" id="cleanupMaskCanvas" hidden aria-label="Magic eraser selection"></canvas>
+              <div class="transform-overlay is-backdrop" id="backdropTransformOverlay" hidden aria-label="Selected backdrop photo">
+                <button class="resize-handle handle-nw" type="button" data-handle="nw" aria-label="Resize backdrop from top left"></button>
+                <button class="resize-handle handle-ne" type="button" data-handle="ne" aria-label="Resize backdrop from top right"></button>
+                <button class="resize-handle handle-se" type="button" data-handle="se" aria-label="Resize backdrop from bottom right"></button>
+                <button class="resize-handle handle-sw" type="button" data-handle="sw" aria-label="Resize backdrop from bottom left"></button>
+              </div>
               <div class="transform-overlay" id="backgroundTransformOverlay" hidden aria-label="Selected background image">
                 <button class="resize-handle handle-nw" type="button" data-handle="nw" aria-label="Resize background from top left"></button>
                 <button class="resize-handle handle-ne" type="button" data-handle="ne" aria-label="Resize background from top right"></button>
@@ -154,8 +219,28 @@
             </div>
           </div>
           <div class="image-tool-row">
-            <span>Drag image to move · drag corners to resize</span>
-            <button class="secondary editor-reset" type="button" id="resetBackgroundTransform">Reset image</button>
+            <span id="editorHint">Drag image to move · drag corners to resize</span>
+            <span class="editor-tools">
+              <span class="layer-switch" role="group" aria-label="Layer to adjust">
+                <button class="secondary editor-reset is-active" type="button" data-layer="image">Image</button>
+                <button class="secondary editor-reset" type="button" data-layer="backdrop" disabled>Backdrop</button>
+              </span>
+              <button class="secondary editor-reset" type="button" id="toggleCleanup">Magic eraser</button>
+              <button class="secondary editor-reset" type="button" id="resetBackgroundTransform">Reset image</button>
+            </span>
+          </div>
+          <div class="cleanup-bar" id="cleanupBar" hidden>
+            <label class="slider-field" for="cleanupBrushInput">
+              <span>Brush</span>
+              <input id="cleanupBrushInput" type="range" min="4" max="140" value="26" />
+              <output id="cleanupBrushValue" for="cleanupBrushInput">26 px</output>
+            </label>
+            <div class="cleanup-actions">
+              <button class="compact-button" type="button" id="applyCleanup">Erase</button>
+              <button class="secondary compact-button" type="button" id="clearCleanupMask">Clear</button>
+              <button class="secondary compact-button" type="button" id="undoCleanup">Undo</button>
+            </div>
+            <p class="source-status" id="cleanupStatus" role="status" aria-live="polite"></p>
           </div>
           <p class="hint">
             Exports at 427 x 575. The bottom title area uses stacked transparent
@@ -228,9 +313,9 @@
               <input class="range-value" data-range-for="producerNameVerticalInput" type="text" inputmode="numeric" value="0%" aria-label="Producer name vertical percentage" />
             </label>
             <label class="range-field">
-              <span>Producer SVG horizontal</span>
+              <span>Producer logo horizontal</span>
               <input id="producerLogoHorizontalInput" type="range" min="-160" max="160" value="0" />
-              <input class="range-value" data-range-for="producerLogoHorizontalInput" type="text" inputmode="numeric" value="0%" aria-label="Producer SVG horizontal percentage" />
+              <input class="range-value" data-range-for="producerLogoHorizontalInput" type="text" inputmode="numeric" value="0%" aria-label="Producer logo horizontal percentage" />
             </label>
             <label class="range-field">
               <span>Producer name size</span>
@@ -238,9 +323,9 @@
               <input class="range-value" data-range-for="producerSizeInput" type="text" inputmode="numeric" value="100%" aria-label="Producer name size percentage" />
             </label>
             <label class="range-field">
-              <span>Producer SVG size</span>
+              <span>Producer logo size</span>
               <input id="producerLogoSizeInput" type="range" min="20" max="400" value="100" />
-              <input class="range-value" data-range-for="producerLogoSizeInput" type="text" inputmode="numeric" value="100%" aria-label="Producer SVG size percentage" />
+              <input class="range-value" data-range-for="producerLogoSizeInput" type="text" inputmode="numeric" value="100%" aria-label="Producer logo size percentage" />
             </label>
           </div>
           <div class="tuning-panel" id="gameTitleTuningPanel" role="tabpanel" hidden>
