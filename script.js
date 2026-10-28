@@ -847,18 +847,31 @@ function getCurveOffset(x, halfWidth, curveHeight) {
 
 function drawCurvedLine(line, y, maxWidth, fontSize, curveAmount, letterSpacing, drawText) {
   const characters = Array.from(line);
-  const totalWidth = measureTitleLine(line, letterSpacing);
+  const isCurved = Math.abs(curveAmount) >= 0.01;
+  const totalWidth = isCurved
+    ? ctx.measureText(line).width + letterSpacing * Math.max(0, characters.length - 1)
+    : measureTitleLine(line, letterSpacing);
   const halfWidth = totalWidth / 2;
   const curveHeight = curveAmount * fontSize * 1.05;
   let cursor = -halfWidth;
+  let prefix = "";
 
-  characters.forEach((character) => {
+  characters.forEach((character, index) => {
     const characterWidth = ctx.measureText(character).width;
-    const centerX = cursor + characterWidth / 2;
+    prefix += character;
+    // Keep the font's pair kerning when placing characters on the curve.
+    const centerX = isCurved
+      ? -halfWidth + ctx.measureText(prefix).width - characterWidth / 2 + index * letterSpacing
+      : cursor + characterWidth / 2;
     const centerY = y - getCurveOffset(centerX, halfWidth, curveHeight);
 
     ctx.save();
     ctx.translate(centerX, centerY);
+    if (isCurved && halfWidth > 0) {
+      // Rotate each glyph to follow the tangent of the same parabolic baseline.
+      const slope = 2 * curveHeight * centerX / (halfWidth * halfWidth);
+      ctx.rotate(Math.atan(slope));
+    }
     drawText(character, 0, 0);
     ctx.restore();
 
