@@ -42,9 +42,7 @@ const controls = {
   producerLogoLabel: document.querySelector("#producerLogoLabel"),
   overlayProducer: document.querySelector("#overlayProducerInput"),
   game: document.querySelector("#gameInput"),
-  titleStyle: document.querySelector("#titleStyleInput"),
   gameFont: document.querySelector("#gameFontInput"),
-  gameFontHint: document.querySelector("#gameFontHint"),
   theme: document.querySelector("#themeInput"),
   themeCode: document.querySelector("#themeCodeInput"),
   gradientHeight: document.querySelector("#gradientHeightInput"),
@@ -109,7 +107,6 @@ const settingsCache = {
     "producerFont",
     "overlayProducer",
     "game",
-    "titleStyle",
     "gameFont",
     "theme",
     "gradientHeight",
@@ -215,245 +212,25 @@ const autoLockGroups = [
   },
 ];
 
-const titleFontFallback = 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif';
+const defaultTitleFont = 'Anton, Impact, "Arial Narrow Bold", sans-serif';
 
-const titleStyles = {
-  custom: {
-    fontFamily: null,
-    fontStyle: "normal",
-    fontWeight: 900,
-    fill: "rgba(255, 252, 237, 0.98)",
-    stroke: "theme",
-    strokeAlpha: 0.3,
-    strokeScale: 0.07,
-    shadow: "rgba(87, 48, 0, 0.3)",
-    shadowBlurScale: 0.18,
-    shadowOffsetScale: 0.06,
-    skew: 0,
-    baseSize: 0.12,
-    maxWidth: 0.82,
-    maxLines: 3,
-    lineHeight: 0.86,
-    y: 0.845,
-    stackShortTitles: false,
-  },
-  candy: {
-    fontFamily: '"Luckiest Guy", "Arial Black", Arial, sans-serif',
-    fontStyle: "normal",
-    fill: "#fff9ef",
-    stroke: "theme",
-    strokeAlpha: 0.82,
-    strokeScale: 0.095,
-    shadow: "rgba(111, 28, 110, 0.5)",
-    shadowBlurScale: 0.12,
-    shadowOffsetScale: 0.055,
-    skew: -0.035,
-    baseSize: 0.145,
-    maxWidth: 0.86,
-    maxLines: 3,
-    lineHeight: 0.8,
-    y: 0.82,
-    stackShortTitles: true,
-  },
-  retro: {
-    fontFamily: '"Alfa Slab One", Georgia, serif',
-    fontStyle: "normal",
-    fontWeight: 800,
-    fill: "#fff2d8",
-    stroke: "rgba(104, 29, 64, 0.72)",
-    strokeScale: 0.085,
-    shadow: "rgba(33, 12, 28, 0.52)",
-    shadowBlurScale: 0.1,
-    shadowOffsetScale: 0.06,
-    skew: -0.025,
-    baseSize: 0.126,
-    maxWidth: 0.86,
-    maxLines: 3,
-    lineHeight: 0.84,
-    y: 0.825,
-    stackShortTitles: true,
-  },
-  comic: {
-    fontFamily: 'Bangers, "Arial Black", Arial, sans-serif',
-    fontStyle: "normal",
-    fill: "#fff6dc",
-    stroke: "rgba(18, 88, 65, 0.78)",
-    strokeScale: 0.09,
-    shadow: "rgba(6, 47, 36, 0.48)",
-    shadowBlurScale: 0.11,
-    shadowOffsetScale: 0.06,
-    skew: -0.06,
-    baseSize: 0.145,
-    maxWidth: 0.86,
-    maxLines: 3,
-    lineHeight: 0.78,
-    y: 0.824,
-    stackShortTitles: true,
-  },
-  grobold: {
-    fontFamily: 'Grobold, "Luckiest Guy", "Arial Black", Arial, sans-serif',
-    fontStyle: "normal",
-    fontWeight: 900,
-    fill: "#fff8e8",
-    stroke: "theme",
-    strokeAlpha: 0.88,
-    strokeScale: 0.105,
-    shadow: "rgba(77, 31, 79, 0.5)",
-    shadowBlurScale: 0.12,
-    shadowOffsetScale: 0.06,
-    skew: -0.035,
-    baseSize: 0.14,
-    maxWidth: 0.88,
-    maxLines: 3,
-    lineHeight: 0.82,
-    y: 0.82,
-    stackShortTitles: true,
-  },
-  olympus: {
-    fontFamily: 'Cinzel, Georgia, "Times New Roman", serif',
-    fontStyle: "normal",
-    fontWeight: 900,
-    fill: "#fff9eb",
-    stroke: "rgba(89, 52, 150, 0.78)",
-    strokeScale: 0.075,
-    shadow: "rgba(38, 20, 90, 0.5)",
-    shadowBlurScale: 0.16,
-    shadowOffsetScale: 0.055,
-    skew: 0,
-    baseSize: 0.118,
-    maxWidth: 0.86,
-    maxLines: 3,
-    lineHeight: 0.9,
-    y: 0.825,
-    stackShortTitles: true,
-  },
-  western: {
-    fontFamily: 'Rye, "Alfa Slab One", Georgia, serif',
-    fontStyle: "normal",
-    fontWeight: 900,
-    fill: "#fff5dc",
-    stroke: "rgba(122, 30, 18, 0.82)",
-    strokeScale: 0.082,
-    shadow: "rgba(49, 15, 9, 0.56)",
-    shadowBlurScale: 0.08,
-    shadowOffsetScale: 0.07,
-    skew: -0.02,
-    baseSize: 0.12,
-    maxWidth: 0.88,
-    maxLines: 3,
-    lineHeight: 0.86,
-    y: 0.825,
-    stackShortTitles: true,
-  },
-  neon: {
-    fontFamily: 'Monoton, "Arial Black", Arial, sans-serif',
-    fontStyle: "normal",
-    fontWeight: 900,
-    fill: "#fffaff",
-    stroke: "rgba(202, 38, 255, 0.82)",
-    strokeScale: 0.07,
-    shadow: "rgba(42, 204, 255, 0.72)",
-    shadowBlurScale: 0.22,
-    shadowOffsetScale: 0.03,
-    skew: -0.035,
-    baseSize: 0.105,
-    maxWidth: 0.9,
-    maxLines: 3,
-    lineHeight: 0.92,
-    y: 0.825,
-    stackShortTitles: true,
-  },
-  pixel: {
-    fontFamily: '"Press Start 2P", "Courier New", monospace',
-    fontStyle: "normal",
-    fontWeight: 900,
-    fill: "#fff8d6",
-    stroke: "rgba(39, 32, 101, 0.84)",
-    strokeScale: 0.06,
-    shadow: "rgba(0, 0, 0, 0.58)",
-    shadowBlurScale: 0.04,
-    shadowOffsetScale: 0.08,
-    skew: 0,
-    baseSize: 0.068,
-    maxWidth: 0.9,
-    maxLines: 3,
-    lineHeight: 1.26,
-    y: 0.83,
-    stackShortTitles: true,
-  },
-  pirate: {
-    fontFamily: '"Pirata One", Georgia, serif',
-    fontStyle: "normal",
-    fontWeight: 900,
-    fill: "#fff0c8",
-    stroke: "rgba(99, 38, 12, 0.84)",
-    strokeScale: 0.095,
-    shadow: "rgba(44, 16, 5, 0.62)",
-    shadowBlurScale: 0.1,
-    shadowOffsetScale: 0.07,
-    skew: -0.025,
-    baseSize: 0.155,
-    maxWidth: 0.88,
-    maxLines: 3,
-    lineHeight: 0.82,
-    y: 0.82,
-    stackShortTitles: true,
-  },
-  horror: {
-    fontFamily: 'Creepster, "Arial Black", Arial, sans-serif',
-    fontStyle: "normal",
-    fontWeight: 900,
-    fill: "#fff2de",
-    stroke: "rgba(109, 5, 18, 0.88)",
-    strokeScale: 0.085,
-    shadow: "rgba(10, 0, 0, 0.7)",
-    shadowBlurScale: 0.13,
-    shadowOffsetScale: 0.07,
-    skew: -0.02,
-    baseSize: 0.15,
-    maxWidth: 0.88,
-    maxLines: 3,
-    lineHeight: 0.82,
-    y: 0.822,
-    stackShortTitles: true,
-  },
-  bubble: {
-    fontFamily: '"Fredoka", "Trebuchet MS", Verdana, sans-serif',
-    fontStyle: "normal",
-    fontWeight: 900,
-    fill: "#fff8f0",
-    stroke: "theme",
-    strokeAlpha: 0.9,
-    strokeScale: 0.11,
-    shadow: "rgba(120, 38, 135, 0.46)",
-    shadowBlurScale: 0.12,
-    shadowOffsetScale: 0.055,
-    skew: -0.025,
-    baseSize: 0.14,
-    maxWidth: 0.88,
-    maxLines: 3,
-    lineHeight: 0.86,
-    y: 0.82,
-    stackShortTitles: true,
-  },
-  scifi: {
-    fontFamily: 'Orbitron, "Arial Black", Arial, sans-serif',
-    fontStyle: "normal",
-    fontWeight: 900,
-    fill: "#f7fbff",
-    stroke: "rgba(31, 105, 159, 0.82)",
-    strokeScale: 0.065,
-    shadow: "rgba(0, 23, 51, 0.6)",
-    shadowBlurScale: 0.14,
-    shadowOffsetScale: 0.055,
-    skew: -0.015,
-    baseSize: 0.096,
-    maxWidth: 0.9,
-    maxLines: 3,
-    lineHeight: 1.02,
-    y: 0.83,
-    stackShortTitles: true,
-  },
+// One shared layout: choosing a font never changes alignment, effects or spacing.
+const titleLayout = {
+  fontStyle: "normal",
+  fill: "#fff9ef",
+  stroke: "theme",
+  strokeAlpha: 0.55,
+  strokeScale: 0.05,
+  shadow: "rgba(0, 0, 0, 0.24)",
+  shadowBlurScale: 0.04,
+  shadowOffsetScale: 0.02,
+  skew: 0,
+  baseSize: 0.14,
+  maxWidth: 0.86,
+  maxLines: 4,
+  lineHeight: 0.9,
+  y: 0.825,
+  stackShortTitles: false,
 };
 
 function hexToRgb(hex) {
@@ -711,42 +488,16 @@ function drawBottomMask(themeColor) {
 }
 
 function getTitleStyle() {
-  const preset = titleStyles[controls.titleStyle.value] || titleStyles.custom;
-  const chosenFont = controls.gameFont.value.trim();
-  const style = {
-    ...titleStyles.custom,
-    ...preset,
-    // An explicitly picked game font overrides the preset's own face; an empty
-    // value means follow whatever the title style brings.
-    fontFamily: chosenFont || preset.fontFamily || titleFontFallback,
-  };
-
   return {
-    ...style,
-    maxLines: Math.max(4, style.maxLines),
+    ...titleLayout,
+    fontFamily: controls.gameFont.value || defaultTitleFont,
+    fontWeight: Number(controls.gameFont.selectedOptions[0]?.dataset.weight) || 900,
   };
 }
 
-function firstFontName(fontFamily) {
-  return fontFamily.split(",")[0].trim().replace(/^["']|["']$/g, "");
-}
-
-function syncGameFontHint() {
-  const styleName = controls.titleStyle.selectedOptions[0]?.textContent.trim() || "the title style";
-  const presetFamily = titleStyles[controls.titleStyle.value]?.fontFamily;
-  const chosenFont = controls.gameFont.value.trim();
-
-  if (chosenFont) {
-    const fontName = controls.gameFont.selectedOptions[0]?.textContent.trim() || firstFontName(chosenFont);
-    controls.gameFontHint.textContent = presetFamily
-      ? `${fontName} overrides ${styleName}`
-      : `${styleName} draws in ${fontName}`;
-    return;
-  }
-
-  controls.gameFontHint.textContent = presetFamily
-    ? `${styleName} draws in ${firstFontName(presetFamily)}`
-    : `${styleName} has no font of its own — using ${firstFontName(titleFontFallback)}`;
+function loadTitleFont() {
+  if (!document.fonts) return Promise.resolve();
+  return document.fonts.load(titleFont(32, getTitleStyle())).then(() => {}).catch(() => {});
 }
 
 function titleFont(size, style) {
@@ -2105,6 +1856,7 @@ async function chooseSaveFile(options) {
 }
 
 async function exportPoster(type) {
+  await loadTitleFont();
   drawPoster();
   const extension = type === "image/webp" ? "webp" : "png";
   const fileName = getExportFileName(extension);
@@ -2455,6 +2207,15 @@ function loadSavedSettings() {
     if (Date.now() - cachedSettings.savedAt > settingsCache.ttl) {
       localStorage.removeItem(settingsCache.key);
       return;
+    }
+
+    // Keep the old chosen face when migrating the former style/font pair.
+    const options = Array.from(controls.gameFont.options);
+    if (!options.some((option) => option.value === cachedSettings.values.gameFont)) {
+      const previousStyle = options.find(
+        (option) => option.dataset.legacyStyle === cachedSettings.values.titleStyle,
+      );
+      cachedSettings.values.gameFont = previousStyle?.value || defaultTitleFont;
     }
 
     settingsCache.fields.forEach((field) => {
@@ -2857,7 +2618,6 @@ controls.deleteProducerPreset.addEventListener("click", () => {
   controls.producerFont,
   controls.overlayProducer,
   controls.game,
-  controls.titleStyle,
   controls.gameFont,
   controls.theme,
   controls.gradientHeight,
@@ -2893,8 +2653,8 @@ controls.deleteProducerPreset.addEventListener("click", () => {
     if (control === controls.theme) {
       syncThemeCode();
     }
-    if (control === controls.titleStyle || control === controls.gameFont) {
-      syncGameFontHint();
+    if (control === controls.gameFont) {
+      loadTitleFont().then(drawPoster);
     }
     saveSettings();
     updateAutoControlLocks();
@@ -2943,10 +2703,9 @@ controls.themeToggle.addEventListener("click", () => {
 });
 
 applyInterfaceTheme(loadInterfaceTheme());
-syncGameFontHint();
 syncBackdropControls();
 drawPoster();
 
 if (document.fonts) {
-  document.fonts.ready.then(drawPoster);
+  document.fonts.ready.then(() => loadTitleFont()).then(drawPoster);
 }

@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Anton&family=Archivo:wght@400;500;600;700&family=Bangers&family=Cinzel:wght@800;900&family=Creepster&family=Fredoka:wght@700&family=Lilita+One&family=Luckiest+Guy&family=Monoton&family=Orbitron:wght@800;900&family=Pirata+One&family=Press+Start+2P&family=Rye&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&amp;family=Anton&amp;family=Archivo%3Awght%40400%3B500%3B600%3B700&amp;family=Baloo+2%3Awght%40800&amp;family=Bangers&amp;family=Bubblegum+Sans&amp;family=Cherry+Bomb+One&amp;family=Chewy&amp;family=Cinzel%3Awght%40800%3B900&amp;family=Creepster&amp;family=DynaPuff%3Awght%40700&amp;family=Fredoka%3Awght%40700&amp;family=Lilita+One&amp;family=Luckiest+Guy&amp;family=Monoton&amp;family=Orbitron%3Awght%40800%3B900&amp;family=Pirata+One&amp;family=Press+Start+2P&amp;family=Rye&amp;display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./styles.css" />
@@ -154,38 +154,42 @@
                 </label>
 
                 <label class="field">
-                  <span>Title style</span>
-                  <select id="titleStyleInput">
-                    <option value="candy">Rounded candy</option>
-                    <option value="retro">Retro slab</option>
-                    <option value="comic">Comic adventure</option>
-                    <option value="grobold">Grobold cartoon</option>
-                    <option value="olympus">Olympus serif</option>
-                    <option value="western">Western wanted</option>
-                    <option value="neon">Neon arcade</option>
-                    <option value="pixel">Pixel arcade</option>
-                    <option value="pirate">Pirate treasure</option>
-                    <option value="horror">Monster horror</option>
-                    <option value="bubble">Bubble pop</option>
-                    <option value="scifi">Sci-fi chrome</option>
-                    <option value="custom">Custom font</option>
-                  </select>
-                </label>
-
-                <label class="field">
                   <span>Game font</span>
                   <select id="gameFontInput">
-                    <option value="">Match title style</option>
-                    <option value='Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif'>Condensed poster</option>
-                    <option value='Anton, Impact, "Arial Narrow Bold", sans-serif'>Anton</option>
-                    <option value='"Arial Black", Arial, sans-serif'>Heavy block</option>
-                    <option value='Grobold, "Luckiest Guy", "Arial Black", Arial, sans-serif'>Grobold</option>
-                    <option value='"Trebuchet MS", Verdana, sans-serif'>Rounded sans</option>
-                    <option value='Georgia, "Times New Roman", serif'>Casino serif</option>
-                    <option value='"Courier New", Courier, monospace'>Arcade mono</option>
-                    <option value='"Segoe UI", Arial, sans-serif'>Clean sans</option>
+                    <optgroup label="Poster">
+                      <option value='Anton, Impact, "Arial Narrow Bold", sans-serif' data-weight="400">Anton · Condensed</option>
+                      <option value='Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif' data-weight="900" data-legacy-style="custom">Impact · Bold</option>
+                      <option value='"Arial Black", Arial, sans-serif' data-weight="900">Arial Black · Heavy</option>
+                    </optgroup>
+                    <optgroup label="Cute &amp; playful">
+                      <option value='"Lilita One", "Arial Black", sans-serif' data-weight="400">Lilita One · Soft bold</option>
+                      <option value='"DynaPuff", "Fredoka", sans-serif' data-weight="700">DynaPuff · Puffy</option>
+                      <option value='"Cherry Bomb One", "Fredoka", sans-serif' data-weight="400">Cherry Bomb One · Bubble</option>
+                      <option value='"Baloo 2", "Fredoka", sans-serif' data-weight="800">Baloo 2 · Friendly</option>
+                      <option value='"Chewy", "Luckiest Guy", sans-serif' data-weight="400">Chewy · Handwritten</option>
+                      <option value='"Bubblegum Sans", "Trebuchet MS", sans-serif' data-weight="400">Bubblegum Sans · Playful</option>
+                      <option value='"Luckiest Guy", "Arial Black", Arial, sans-serif' data-weight="400" data-legacy-style="candy">Luckiest Guy · Rounded</option>
+                      <option value='"Fredoka", "Trebuchet MS", Verdana, sans-serif' data-weight="700" data-legacy-style="bubble">Fredoka · Soft</option>
+                    </optgroup>
+                    <optgroup label="Display">
+                      <option value='Bangers, "Arial Black", Arial, sans-serif' data-weight="400" data-legacy-style="comic">Bangers · Comic</option>
+                      <option value='"Alfa Slab One", Georgia, serif' data-weight="400" data-legacy-style="retro">Alfa Slab One · Slab</option>
+                      <option value='Cinzel, Georgia, "Times New Roman", serif' data-weight="900" data-legacy-style="olympus">Cinzel · Serif</option>
+                      <option value='Orbitron, "Arial Black", Arial, sans-serif' data-weight="900" data-legacy-style="scifi">Orbitron · Sci-fi</option>
+                      <option value='Rye, "Alfa Slab One", Georgia, serif' data-weight="400" data-legacy-style="western">Rye · Western</option>
+                      <option value='"Pirata One", Georgia, serif' data-weight="400" data-legacy-style="pirate">Pirata One · Pirate</option>
+                      <option value='Creepster, "Arial Black", Arial, sans-serif' data-weight="400" data-legacy-style="horror">Creepster · Horror</option>
+                      <option value='"Press Start 2P", "Courier New", monospace' data-weight="400" data-legacy-style="pixel">Press Start 2P · Pixel</option>
+                      <option value='Monoton, "Arial Black", Arial, sans-serif' data-weight="400" data-legacy-style="neon">Monoton · Outline</option>
+                      <option value='Grobold, "Luckiest Guy", "Arial Black", Arial, sans-serif' data-weight="400" data-legacy-style="grobold">Grobold · Cartoon</option>
+                    </optgroup>
+                    <optgroup label="Classic">
+                      <option value='"Trebuchet MS", Verdana, sans-serif' data-weight="900">Trebuchet MS</option>
+                      <option value='Georgia, "Times New Roman", serif' data-weight="900">Georgia</option>
+                      <option value='"Courier New", Courier, monospace' data-weight="900">Courier New</option>
+                      <option value='"Segoe UI", Arial, sans-serif' data-weight="900">Segoe UI</option>
+                    </optgroup>
                   </select>
-                  <small id="gameFontHint"></small>
                 </label>
 
                 <label class="field">
