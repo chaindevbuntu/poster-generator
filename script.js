@@ -44,6 +44,7 @@ const controls = {
   game: document.querySelector("#gameInput"),
   titleStyle: document.querySelector("#titleStyleInput"),
   gameFont: document.querySelector("#gameFontInput"),
+  gameFontHint: document.querySelector("#gameFontHint"),
   theme: document.querySelector("#themeInput"),
   themeCode: document.querySelector("#themeCodeInput"),
   gradientHeight: document.querySelector("#gradientHeightInput"),
@@ -82,6 +83,12 @@ const controls = {
   deleteProducerPreset: document.querySelector("#deleteProducerPreset"),
   png: document.querySelector("#downloadPng"),
   webp: document.querySelector("#downloadWebp"),
+  themeToggle: document.querySelector("#themeToggle"),
+  themeToggleLabel: document.querySelector("#themeToggleLabel"),
+};
+
+const themeCache = {
+  key: "gamePosterGeneratorTheme",
 };
 
 const poster = {
@@ -207,6 +214,8 @@ const autoLockGroups = [
     ],
   },
 ];
+
+const titleFontFallback = 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif';
 
 const titleStyles = {
   custom: {
@@ -703,16 +712,41 @@ function drawBottomMask(themeColor) {
 
 function getTitleStyle() {
   const preset = titleStyles[controls.titleStyle.value] || titleStyles.custom;
+  const chosenFont = controls.gameFont.value.trim();
   const style = {
     ...titleStyles.custom,
     ...preset,
-    fontFamily: preset.fontFamily || controls.gameFont.value,
+    // An explicitly picked game font overrides the preset's own face; an empty
+    // value means follow whatever the title style brings.
+    fontFamily: chosenFont || preset.fontFamily || titleFontFallback,
   };
 
   return {
     ...style,
     maxLines: Math.max(4, style.maxLines),
   };
+}
+
+function firstFontName(fontFamily) {
+  return fontFamily.split(",")[0].trim().replace(/^["']|["']$/g, "");
+}
+
+function syncGameFontHint() {
+  const styleName = controls.titleStyle.selectedOptions[0]?.textContent.trim() || "the title style";
+  const presetFamily = titleStyles[controls.titleStyle.value]?.fontFamily;
+  const chosenFont = controls.gameFont.value.trim();
+
+  if (chosenFont) {
+    const fontName = controls.gameFont.selectedOptions[0]?.textContent.trim() || firstFontName(chosenFont);
+    controls.gameFontHint.textContent = presetFamily
+      ? `${fontName} overrides ${styleName}`
+      : `${styleName} draws in ${fontName}`;
+    return;
+  }
+
+  controls.gameFontHint.textContent = presetFamily
+    ? `${styleName} draws in ${firstFontName(presetFamily)}`
+    : `${styleName} has no font of its own — using ${firstFontName(titleFontFallback)}`;
 }
 
 function titleFont(size, style) {
@@ -838,27 +872,47 @@ function fitTitleLines(lines, maxWidth, startingSize, style) {
   return startingSize;
 }
 
-function getCurveOffset(x, halfWidth, curveHeight) {
+/* Casino game titles arch by roughly 15-20% of their cap height, which is about
+   0.14em of arch depth. Full slider travel maps to 0.35em so that reference
+   look lands near 40 instead of being squeezed into the first few steps. */
+const titleCurveDepthScale = 0.35;
+
+function getCurveOffset(x, halfWidth, curveDepth) {
   if (halfWidth <= 0) return 0;
 
   const normalized = x / halfWidth;
-  return curveHeight * (1 - normalized * normalized);
+  /* Balanced around the parabola's own mean (2/3), so the middle lifts and the
+     ends drop by the same total while the line keeps its vertical position. */
+  return curveDepth * (1 / 3 - normalized * normalized);
 }
 
 function drawCurvedLine(line, y, maxWidth, fontSize, curveAmount, letterSpacing, drawText) {
   const characters = Array.from(line);
-  const totalWidth = measureTitleLine(line, letterSpacing);
+  const isCurved = Math.abs(curveAmount) >= 0.01;
+  const totalWidth = isCurved
+    ? ctx.measureText(line).width + letterSpacing * Math.max(0, characters.length - 1)
+    : measureTitleLine(line, letterSpacing);
   const halfWidth = totalWidth / 2;
-  const curveHeight = curveAmount * fontSize * 1.05;
+  const curveDepth = curveAmount * fontSize * titleCurveDepthScale;
   let cursor = -halfWidth;
+  let prefix = "";
 
-  characters.forEach((character) => {
+  characters.forEach((character, index) => {
     const characterWidth = ctx.measureText(character).width;
-    const centerX = cursor + characterWidth / 2;
-    const centerY = y - getCurveOffset(centerX, halfWidth, curveHeight);
+    prefix += character;
+    // Keep the font's pair kerning when placing characters on the curve.
+    const centerX = isCurved
+      ? -halfWidth + ctx.measureText(prefix).width - characterWidth / 2 + index * letterSpacing
+      : cursor + characterWidth / 2;
+    const centerY = y - getCurveOffset(centerX, halfWidth, curveDepth);
 
     ctx.save();
     ctx.translate(centerX, centerY);
+    if (isCurved && halfWidth > 0) {
+      // Rotate each glyph to follow the tangent of the same parabolic baseline.
+      const slope = 2 * curveDepth * centerX / (halfWidth * halfWidth);
+      ctx.rotate(Math.atan(slope));
+    }
     drawText(character, 0, 0);
     ctx.restore();
 
@@ -2839,6 +2893,9 @@ controls.deleteProducerPreset.addEventListener("click", () => {
     if (control === controls.theme) {
       syncThemeCode();
     }
+    if (control === controls.titleStyle || control === controls.gameFont) {
+      syncGameFontHint();
+    }
     saveSettings();
     updateAutoControlLocks();
     drawPoster();
@@ -2856,6 +2913,37 @@ loadSavedProducerLogo();
 controls.png.addEventListener("click", () => exportPoster("image/png"));
 controls.webp.addEventListener("click", () => exportPoster("image/webp"));
 
+function applyInterfaceTheme(theme) {
+  const nextTheme = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = nextTheme;
+  controls.themeToggleLabel.textContent = nextTheme === "dark" ? "Dark" : "Light";
+  controls.themeToggle.setAttribute("aria-pressed", String(nextTheme === "dark"));
+}
+
+function loadInterfaceTheme() {
+  try {
+    const stored = localStorage.getItem(themeCache.key);
+    if (stored) return stored;
+  } catch (error) {
+    // Browsers can block localStorage in private or restricted modes.
+  }
+
+  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+controls.themeToggle.addEventListener("click", () => {
+  const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  applyInterfaceTheme(nextTheme);
+
+  try {
+    localStorage.setItem(themeCache.key, nextTheme);
+  } catch (error) {
+    // Browsers can block localStorage in private or restricted modes.
+  }
+});
+
+applyInterfaceTheme(loadInterfaceTheme());
+syncGameFontHint();
 syncBackdropControls();
 drawPoster();
 

@@ -52,12 +52,18 @@ const removeTextModel = process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
 const removeTextSize = process.env.OPENAI_IMAGE_SIZE || "1024x1376";
 const removeTextQualities = new Set(["low", "medium", "high"]);
 const removeTextMaxBodyBytes = 12 * 1024 * 1024;
+/* Naming the objects worth keeping (cards, reels, chips...) made the model treat
+   them as things to draw, so this states the edit and the invariants instead and
+   never enumerates subject matter. */
 const removeTextPromptPrefix = [
-  "Remove all overlaid marketing text, game title lettering, provider or studio",
-  "names, logos and watermarks. Keep text that is physically part of game objects",
-  "(playing card ranks and suits, roulette numbers, slot reel symbols, dice pips,",
-  "chip denominations). Preserve the original art style, lighting, palette and",
-  "subject. Center the main subject prominently.",
+  "Remove only the overlaid title lettering, studio or provider name, logos and",
+  "watermarks that sit on top of the artwork. Do not change any other aspect of",
+  "the image. Keep the same subject, pose, composition, framing, art style,",
+  "lighting, colour palette and background exactly as they are. Do not add,",
+  "invent or introduce any new object, prop, character, symbol, scenery or",
+  "decoration that is not already visible in the input image. Lettering that is",
+  "physically printed on an object already present must stay unchanged. Where",
+  "text is removed, continue the surrounding background behind it.",
 ].join(" ");
 
 const producerSettingFields = new Set([

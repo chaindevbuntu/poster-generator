@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,26 +7,33 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Anton&family=Bangers&family=Cinzel:wght@800;900&family=Creepster&family=Fredoka:wght@700&family=Lilita+One&family=Luckiest+Guy&family=Monoton&family=Orbitron:wght@800;900&family=Pirata+One&family=Press+Start+2P&family=Rye&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Anton&family=Archivo:wght@400;500;600;700&family=Bangers&family=Cinzel:wght@800;900&family=Creepster&family=Fredoka:wght@700&family=Lilita+One&family=Luckiest+Guy&family=Monoton&family=Orbitron:wght@800;900&family=Pirata+One&family=Press+Start+2P&family=Rye&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="app-shell">
-      <section class="intro">
-        <p class="eyebrow">Poster Forge</p>
-        <h1>Game poster generator</h1>
-        <p class="lede">
-          Upload a background, set the producer and game name, choose a theme
-          color, then export a polished PNG or WebP poster.
-        </p>
-      </section>
+    <div class="app">
+      <header class="topbar">
+        <h1 class="wordmark">Poster Forge</h1>
+        <span class="export-size">427 × 575</span>
+        <div class="topbar-actions">
+          <label class="topbar-field" for="exportFilenameInput">
+            <span>File</span>
+            <input id="exportFilenameInput" type="text" placeholder="Use game name if empty" />
+          </label>
+          <button class="ghost" type="button" id="themeToggle" aria-pressed="true">
+            <span id="themeToggleLabel">Dark</span>
+          </button>
+          <button class="primary" type="button" id="downloadPng">PNG</button>
+          <button class="secondary" type="button" id="downloadWebp">WebP</button>
+        </div>
+      </header>
 
-      <section class="workspace" aria-label="Poster generator workspace">
-        <form class="panel controls" id="posterForm">
+      <main class="workspace" aria-label="Poster generator workspace">
+        <form class="rail controls" id="posterForm">
           <div class="control-accordion">
-            <details class="control-section" data-control-section="background" open>
+            <details class="control-section" name="controlSection" data-control-section="background" open>
               <summary>Background</summary>
               <div class="control-section-body background-source">
                 <label class="upload-zone" for="backgroundInput">
@@ -46,10 +53,11 @@
 
                 <div class="ai-cleanup">
                   <span class="upload-kicker">Remove text with AI</span>
-                  <small>Redraws the whole image when the eraser cannot cope. Text on cards, wheels and reels is kept.</small>
+                  <small>Redraws the whole image when the eraser cannot cope. Lettering printed on objects in the artwork is kept.</small>
                   <label class="field" for="aiPromptInput">
                     <span>Instruction</span>
-                    <textarea id="aiPromptInput" rows="2">删除图片里的游戏标题以及厂商名字，在正中间突出主体</textarea>
+                    <textarea id="aiPromptInput" rows="2">只删除烤进图片里的游戏标题和厂商名字，不要新增任何元素</textarea>
+                    <small>Avoid asking for recomposition (for example "centre the subject") — that licenses the model to rebuild the frame and fill it with invented props.</small>
                   </label>
                   <div class="url-loader">
                     <label class="field" for="aiQualityInput">
@@ -60,14 +68,14 @@
                         <option value="high">High · ~$0.17</option>
                       </select>
                     </label>
-                    <button class="compact-button" type="button" id="runAiCleanup">Redraw</button>
+                    <button class="primary compact-button" type="button" id="runAiCleanup">Redraw</button>
                   </div>
                   <p class="source-status" id="aiCleanupStatus" role="status" aria-live="polite"></p>
                 </div>
               </div>
             </details>
 
-            <details class="control-section" data-control-section="backdrop">
+            <details class="control-section" name="controlSection" data-control-section="backdrop">
               <summary>Backdrop layer</summary>
               <div class="control-section-body field-grid">
                 <small class="backdrop-intro">Sits behind the background image, so shrinking or moving the image never leaves an empty band.</small>
@@ -104,7 +112,7 @@
               </div>
             </details>
 
-            <details class="control-section" data-control-section="producer">
+            <details class="control-section" name="controlSection" data-control-section="producer">
               <summary>Producer</summary>
               <div class="control-section-body field-grid">
                 <label class="field">
@@ -136,7 +144,7 @@
               </div>
             </details>
 
-            <details class="control-section" data-control-section="game">
+            <details class="control-section" name="controlSection" data-control-section="game">
               <summary>Game</summary>
               <div class="control-section-body field-grid">
                 <label class="field">
@@ -167,6 +175,7 @@
                 <label class="field">
                   <span>Game font</span>
                   <select id="gameFontInput">
+                    <option value="">Match title style</option>
                     <option value='Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif'>Condensed poster</option>
                     <option value='Anton, Impact, "Arial Narrow Bold", sans-serif'>Anton</option>
                     <option value='"Arial Black", Arial, sans-serif'>Heavy block</option>
@@ -176,6 +185,7 @@
                     <option value='"Courier New", Courier, monospace'>Arcade mono</option>
                     <option value='"Segoe UI", Arial, sans-serif'>Clean sans</option>
                   </select>
+                  <small id="gameFontHint"></small>
                 </label>
 
                 <label class="field">
@@ -188,19 +198,10 @@
               </div>
             </details>
           </div>
-
-          <div class="actions">
-            <label class="field export-filename">
-              <span>Export filename</span>
-              <input id="exportFilenameInput" type="text" placeholder="Use game name if empty" />
-            </label>
-            <button type="button" id="downloadPng">Export PNG</button>
-            <button type="button" id="downloadWebp" class="secondary">Export WebP</button>
-          </div>
         </form>
 
-        <section class="preview-panel" aria-label="Generated poster preview">
-          <div class="poster-frame">
+        <section class="stage" aria-label="Generated poster preview">
+          <div class="stage-canvas">
             <div class="canvas-editor" id="canvasEditor">
               <canvas id="posterCanvas" width="427" height="575"></canvas>
               <canvas class="cleanup-mask" id="cleanupMaskCanvas" hidden aria-label="Magic eraser selection"></canvas>
@@ -218,6 +219,7 @@
               </div>
             </div>
           </div>
+          <div class="stage-dock">
           <div class="image-tool-row">
             <span id="editorHint">Drag image to move · drag corners to resize</span>
             <span class="editor-tools">
@@ -236,20 +238,17 @@
               <output id="cleanupBrushValue" for="cleanupBrushInput">26 px</output>
             </label>
             <div class="cleanup-actions">
-              <button class="compact-button" type="button" id="applyCleanup">Erase</button>
+              <button class="primary compact-button" type="button" id="applyCleanup">Erase</button>
               <button class="secondary compact-button" type="button" id="clearCleanupMask">Clear</button>
               <button class="secondary compact-button" type="button" id="undoCleanup">Undo</button>
             </div>
             <p class="source-status" id="cleanupStatus" role="status" aria-live="polite"></p>
           </div>
-          <p class="hint">
-            Exports at 427 x 575. The bottom title area uses stacked transparent
-            gradients, not a flat block, so it keeps the original image visible.
-          </p>
+          </div>
         </section>
 
-        <section class="advanced" aria-label="Tuning controls">
-          <h2>Tuning controls</h2>
+        <aside class="rail advanced" aria-label="Tuning controls">
+          <h2>Tuning</h2>
           <details class="preset-manager producer-preset-manager">
             <summary>
               <span>Producer library</span>
@@ -268,7 +267,7 @@
                   <span>Save current producer</span>
                   <input id="producerPresetNameInput" type="text" maxlength="80" placeholder="Producer preset name" />
                 </label>
-                <button type="button" id="saveProducerPreset">Save</button>
+                <button class="primary" type="button" id="saveProducerPreset">Save</button>
               </div>
               <p class="preset-status" id="producerPresetStatus" role="status" aria-live="polite"></p>
             </div>
@@ -416,9 +415,9 @@
               <span>Game name</span>
             </label>
           </div>
-        </section>
-      </section>
-    </main>
+        </aside>
+      </main>
+    </div>
 
     <script src="./script.js"></script>
   </body>
