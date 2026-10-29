@@ -338,8 +338,95 @@ async function removeTextFromImage(request) {
   return `data:image/png;base64,${encodedImage}`;
 }
 
+// Batch import uses a fixed CDN boundary; arbitrary remote URLs are never proxied.
+const batchCdnOrigin = "https://cdn.zmsfnxxx.xyz";
+const batchCatalogCache = new Map();
+
+function validateBatchCdnUrl(value, kind) {
+  let url;
+  try { url = new URL(value); } catch { throw Object.assign(new Error("Invalid CDN URL."), { status: 400 }); }
+  const validPath = kind === "catalog"
+    ? /^\/l\/[a-zA-Z0-9_-]+\.json$/.test(url.pathname)
+    : /^\/i\/s6\/[a-zA-Z0-9_-]+\/[^/]+\.png$/.test(url.pathname);
+  let decoded;
+  try { decoded = decodeURIComponent(url.pathname); } catch { decoded = ""; }
+  if (url.origin !== batchCdnOrigin || url.username || url.password || url.search || url.hash || !validPath ||
+      !decoded || decoded.includes("\\") || decoded.split("/").some(part => part === "." || part === "..") ||
+      (kind === "image" && decoded.split("/").length !== 5)) {
+    throw Object.assign(new Error("Use a catalog or image URL from the configured game CDN."), { status: 400 });
+  }
+  return url;
+}
+
+async function readBatchCdn(url, maxBytes) {
+  const result = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(45000) });
+  if (!result.ok) { await result.body?.cancel(); throw Object.assign(new Error(`CDN returned ${result.status}.`), { status: 502 }); }
+  if (Number(result.headers.get("content-length")) > maxBytes) {
+    await result.body?.cancel();
+    throw Object.assign(new Error("CDN file is too large."), { status: 413 });
+  }
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of result.body) {
+    bytes += chunk.length;
+    if (bytes > maxBytes) throw Object.assign(new Error("CDN file is too large."), { status: 413 });
+    chunks.push(chunk);
+  }
+  return { data: Buffer.concat(chunks), type: (result.headers.get("content-type") || "").split(";")[0] };
+}
+
+function normalizeBatchCatalog(input) {
+  const rows = Array.isArray(input) ? input : input?.games;
+  if (!Array.isArray(rows)) throw Object.assign(new Error("Catalog must be an array or a games array."), { status: 400 });
+  const seen = new Set();
+  const games = [];
+  for (const row of rows) {
+    if (!row || typeof row.identifier !== "string" || typeof row.title !== "string") continue;
+    const separator = row.identifier.indexOf(":");
+    const folder = row.identifier.slice(0, separator);
+    const id = row.identifier.slice(separator + 1);
+    if (separator < 1 || !/^[a-zA-Z0-9_-]+$/.test(folder) || !id || id.length > 240 ||
+        /[/\\\x00-\x1f]/.test(id) || id === "." || id === ".." || seen.has(row.identifier)) continue;
+    seen.add(row.identifier);
+    games.push({ key: row.identifier, id, name: row.title.slice(0, 240), producer: String(row.producer || folder).slice(0, 100),
+      folder, imageUrl: `${batchCdnOrigin}/i/s6/${folder}/${encodeURIComponent(id)}.png` });
+  }
+  if (!games.length) throw Object.assign(new Error("No usable title / identifier records in this catalog."), { status: 400 });
+  return { games, skipped: rows.length - games.length };
+}
+
+async function handleBatchApi(request, response, pathname) {
+  const query = new URL(request.url, "http://localhost").searchParams;
+  if (pathname === "/api/batch/catalog") {
+    const url = validateBatchCdnUrl(query.get("url"), "catalog");
+    const cache = batchCatalogCache.get(url.href);
+    if (cache && Date.now() - cache.at < 300000) { sendJson(response, 200, cache.catalog); return; }
+    const { data } = await readBatchCdn(url, 12 * 1024 * 1024);
+    let source;
+    try { source = JSON.parse(data.toString("utf8")); } catch { throw Object.assign(new Error("CDN did not return valid JSON."), { status: 502 }); }
+    const catalog = normalizeBatchCatalog(source);
+    if (batchCatalogCache.size >= 64) batchCatalogCache.delete(batchCatalogCache.keys().next().value);
+    batchCatalogCache.set(url.href, { at: Date.now(), catalog });
+    sendJson(response, 200, catalog);
+    return;
+  }
+  const url = validateBatchCdnUrl(query.get("url"), "image");
+  const { data, type } = await readBatchCdn(url, 20 * 1024 * 1024);
+  if (!["image/png", "image/jpeg", "image/webp"].includes(type)) {
+    throw Object.assign(new Error("CDN did not return a supported image."), { status: 502 });
+  }
+  response.writeHead(200, { "Content-Type": type, "Content-Length": data.length, "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff" });
+  response.end(data);
+}
+
+
 async function handleApi(request, response, pathname) {
   try {
+    if (["/api/batch/catalog", "/api/batch/image"].includes(pathname) && request.method === "GET") {
+      await handleBatchApi(request, response, pathname);
+      return;
+    }
+
     if (pathname === "/api/producer-presets" && request.method === "GET") {
       sendJson(response, 200, { presets: await listProducerPresets() });
       return;

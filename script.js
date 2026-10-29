@@ -2127,7 +2127,7 @@ function setProducerLogo(dataUrl, fileName, persist = true) {
   };
   image.src = dataUrl;
 
-  if (!persist) return;
+  if (!persist || batchWorkspace?.editing || batchWorkspace?.busy) return;
 
   try {
     localStorage.setItem(
@@ -2150,7 +2150,7 @@ function clearProducerLogo() {
   controls.producerLogo.value = "";
   controls.producerLogoLabel.textContent = "Optional: replaces producer text";
   try {
-    localStorage.removeItem(producerLogoCache.key);
+    if (!batchWorkspace?.editing && !batchWorkspace?.busy) localStorage.removeItem(producerLogoCache.key);
   } catch (error) {
     // Browsers can block localStorage in private or restricted modes.
   }
@@ -2229,6 +2229,7 @@ function getSettingsSnapshot() {
 }
 
 function saveSettings() {
+  if (batchWorkspace?.editing || batchWorkspace?.busy) return;
   try {
     localStorage.setItem(
       settingsCache.key,
@@ -2753,3 +2754,414 @@ drawPoster();
 if (document.fonts) {
   document.fonts.ready.then(() => loadTitleFont()).then(drawPoster);
 }
+
+
+// The batch workspace shares the existing renderer and every tuning control.
+var batchWorkspace = { entries: [], selected: new Set(), page: 0, query: "", editing: null,
+  personal: null, base: null, busy: false, cancelled: false, controller: null, mode: "editor" };
+const batchUi = Object.fromEntries([...document.querySelectorAll("[id^=batch]")].map(el => [el.id.slice(5), el]));
+const batchPageSize = 6;
+const batchExtraFields = ["backdropMode", "backdropBlur", "backdropColor", "backgroundUrl", "aiPrompt", "aiQuality", "cleanupBrush"];
+let batchMessageTimer;
+
+function batchNotify(message, error = false) {
+  batchUi.Message.textContent = message;
+  batchUi.Message.classList.toggle("is-error", error);
+  batchUi.Message.hidden = false;
+  clearTimeout(batchMessageTimer);
+  batchMessageTimer = setTimeout(() => { batchUi.Message.hidden = true; }, error ? 10000 : 4000);
+}
+
+function batchStatus(message, error = false) {
+  batchUi.Status.textContent = message;
+  batchUi.Status.classList.toggle("is-error", error);
+}
+
+function batchProxyUrl(imageUrl) { return apiUrl(`api/batch/image?url=${encodeURIComponent(imageUrl)}`); }
+function batchImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const timeout = setTimeout(() => { image.src = ""; reject(new Error("图片读取超时，请重试。")); }, 45000);
+    image.onload = () => { clearTimeout(timeout); resolve(image); };
+    image.onerror = () => { clearTimeout(timeout); reject(new Error("图片读取失败，请重试或使用本地图片。")); };
+    image.src = url;
+  });
+}
+function batchBlobImage(blob) {
+  const url = URL.createObjectURL(blob);
+  return batchImage(url).finally(() => URL.revokeObjectURL(url));
+}
+function batchSourceBlob(image) {
+  if (!image) return Promise.resolve(null);
+  const source = document.createElement("canvas");
+  source.width = image.naturalWidth || image.width;
+  source.height = image.naturalHeight || image.height;
+  source.getContext("2d").drawImage(image, 0, 0);
+  return new Promise((resolve, reject) => source.toBlob(blob => blob ? resolve(blob) : reject(new Error("无法保存精修图片。")), "image/png"));
+}
+function batchValues() {
+  const values = getSettingsSnapshot();
+  batchExtraFields.forEach(key => { values[key] = controls[key].value; });
+  return values;
+}
+function batchApplyValues(values) {
+  Object.entries(values).forEach(([key, value]) => {
+    const control = controls[key];
+    if (!control) return;
+    if (control.type === "checkbox") control.checked = value;
+    else control.value = value;
+    updateRangeValue(control);
+  });
+  syncThemeCode();
+  updateAutoControlLocks();
+  syncBackdropControls();
+}
+function batchCaptureEditor() {
+  const mask = document.createElement("canvas");
+  mask.width = controls.cleanupMask.width; mask.height = controls.cleanupMask.height;
+  if (backgroundEdit.cleanupActive) mask.getContext("2d").drawImage(controls.cleanupMask, 0, 0);
+  return { values: batchValues(), poster: { ...poster, imageTransform: poster.imageTransform && { ...poster.imageTransform } },
+    backdrop: { ...backdrop, imageTransform: backdrop.imageTransform && { ...backdrop.imageTransform } },
+    edit: { ...backgroundEdit, history: [...backgroundEdit.history] },
+    labels: [controls.uploadLabel.textContent, controls.backdropPhotoLabel.textContent, controls.producerLogoLabel.textContent],
+    sourceStatus: controls.backgroundUrlStatus.textContent, cleanupStatus: controls.cleanupStatus.textContent,
+    aiStatus: controls.aiCleanupStatus.textContent, mask,
+    section: document.querySelector('[data-control-section][open]')?.dataset.controlSection,
+    tuning: document.querySelector('.tuning-tab.is-active')?.dataset.tabTarget };
+}
+function batchRestoreEditor(snapshot) {
+  if (backgroundEdit.cleanupActive) setCleanupMode(false);
+  Object.assign(poster, snapshot.poster, { imageTransform: snapshot.poster.imageTransform && { ...snapshot.poster.imageTransform } });
+  Object.assign(backdrop, snapshot.backdrop, { imageTransform: snapshot.backdrop.imageTransform && { ...snapshot.backdrop.imageTransform } });
+  Object.assign(backgroundEdit, snapshot.edit, { history: [...snapshot.edit.history], cleanupActive: false });
+  batchApplyValues(snapshot.values);
+  [controls.uploadLabel, controls.backdropPhotoLabel, controls.producerLogoLabel].forEach((label, i) => { label.textContent = snapshot.labels[i]; });
+  setBackgroundSourceStatus(snapshot.sourceStatus);
+  setAiCleanupStatus(snapshot.aiStatus);
+  if (snapshot.edit.cleanupActive) {
+    setCleanupMode(true);
+    controls.cleanupMask.getContext("2d").drawImage(snapshot.mask, 0, 0);
+    backgroundEdit.strokeBounds = snapshot.edit.strokeBounds && { ...snapshot.edit.strokeBounds };
+  }
+  setCleanupStatus(snapshot.cleanupStatus);
+  if (snapshot.section) openControlSection(snapshot.section);
+  if (snapshot.tuning) document.querySelector(`[data-tab-target="${snapshot.tuning}"]`)?.click();
+  invalidateBackdropBlur();
+  drawPoster();
+}
+function batchGetTemplate() {
+  return { values: batchValues(), logo: { image: poster.producerLogo, dataUrl: poster.producerLogoDataUrl, fileName: poster.producerLogoFileName },
+    backdrop: { image: backdrop.image, imageTransform: backdrop.imageTransform && { ...backdrop.imageTransform } } };
+}
+async function batchLoadEntry(entry, template, useDraft = false) {
+  resetBackgroundEditState();
+  const draft = useDraft && entry.draft;
+  const image = entry.draft?.source ? await batchBlobImage(entry.draft.source)
+    : entry.file ? await batchBlobImage(entry.file) : await batchImage(batchProxyUrl(entry.imageUrl));
+  poster.image = image;
+  poster.imageTransform = entry.draft?.transform ? { ...entry.draft.transform } : getCoverTransform(image);
+  batchApplyValues(draft ? draft.values : template.values);
+  const logo = draft ? draft.logo : template.logo;
+  poster.producerLogo = logo.image;
+  poster.producerLogoDataUrl = logo.dataUrl;
+  poster.producerLogoFileName = logo.fileName;
+  controls.producerLogoLabel.textContent = logo.fileName || "Choose an SVG or PNG";
+  const background = draft ? draft.backdrop : template.backdrop;
+  backdrop.image = background.image;
+  backdrop.imageTransform = background.imageTransform && { ...background.imageTransform };
+  if (!draft) {
+    controls.game.value = entry.draft?.values.game || entry.name;
+    controls.producer.value = entry.producer.toUpperCase();
+    controls.exportFilename.value = entry.id;
+  }
+  controls.uploadLabel.textContent = `${entry.id} · 批量素材`;
+  setBackgroundSourceStatus(""); setCleanupStatus(""); setAiCleanupStatus("");
+  invalidateBackdropBlur();
+  await loadTitleFont();
+  drawPoster();
+}
+function batchSetOutput(entry, blob) {
+  if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
+  entry.preview = blob;
+  entry.previewUrl = URL.createObjectURL(blob);
+}
+function batchExportType() { return batchUi.Format.value === "png" ? "image/png" : "image/webp"; }
+function batchNewDraft(entry, source = null) {
+  return { values: batchValues(), source: source || entry.draft?.source || null,
+    transform: { ...poster.imageTransform }, logo: { image: poster.producerLogo, dataUrl: poster.producerLogoDataUrl, fileName: poster.producerLogoFileName },
+    backdrop: { image: backdrop.image, imageTransform: backdrop.imageTransform && { ...backdrop.imageTransform } } };
+}
+function batchFiltered() {
+  const query = batchWorkspace.query.trim().toLowerCase();
+  return batchWorkspace.entries.filter(entry => `${entry.name} ${entry.id} ${entry.producer}`.toLowerCase().includes(query));
+}
+function batchPageEntries() { return batchFiltered().slice(batchWorkspace.page * batchPageSize, (batchWorkspace.page + 1) * batchPageSize); }
+function batchCounts() {
+  const entries = batchWorkspace.entries;
+  const selected = entries.filter(entry => batchWorkspace.selected.has(entry.key));
+  return { selected, approved: selected.filter(entry => entry.status === "approved" && entry.preview), totalApproved: entries.filter(entry => entry.status === "approved").length };
+}
+function batchUpdateActions() {
+  const { selected, approved, totalApproved } = batchCounts();
+  batchUi.Count.textContent = `${batchFiltered().length} 个游戏 · 已选 ${selected.length}`;
+  batchUi.Generate.disabled = batchWorkspace.busy || !selected.length;
+  batchUi.Approve.disabled = batchWorkspace.busy || !selected.some(entry => entry.preview);
+  batchUi.Export.disabled = batchWorkspace.busy || !approved.length;
+  batchUi.Export.textContent = `导出所选已通过 ${approved.length} 张 · ZIP`;
+  batchUi.Summary.textContent = `共 ${batchWorkspace.entries.length} 张 · 已通过 ${totalApproved} 张`;
+}
+function batchRender() {
+  const filtered = batchFiltered();
+  const pages = Math.max(1, Math.ceil(filtered.length / batchPageSize));
+  batchWorkspace.page = Math.min(batchWorkspace.page, pages - 1);
+  batchUi.Grid.replaceChildren();
+  if (!filtered.length) {
+    const empty = document.createElement("div"); empty.className = "batch-empty";
+    const heading = document.createElement("strong"); heading.textContent = batchWorkspace.entries.length ? "没有匹配的游戏" : "读取厂商清单，或选择本地多张图片";
+    const hint = document.createElement("span"); hint.textContent = "游戏图片与名称一起导入，继续用原工作台逐张精修。";
+    empty.append(heading, hint); batchUi.Grid.append(empty);
+  }
+  const statuses = { ready: "待生成", generated: "待检查", edited: "已精修", approved: "已通过", error: "读取失败" };
+  batchPageEntries().forEach(entry => {
+    const tile = document.createElement("article"); tile.className = "batch-tile"; tile.dataset.selected = String(batchWorkspace.selected.has(entry.key));
+    const picture = document.createElement("div"); picture.className = "batch-picture";
+    const image = document.createElement("img"); image.alt = entry.name; image.loading = "lazy";
+    image.src = entry.previewUrl || entry.localUrl || batchProxyUrl(entry.imageUrl);
+    const imageError = document.createElement("span"); imageError.className = "batch-image-error"; imageError.textContent = "图片未能读取\n可点精修重试"; imageError.hidden = true;
+    image.onerror = () => { image.hidden = true; imageError.hidden = false; };
+    const label = document.createElement("label"); const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.checked = batchWorkspace.selected.has(entry.key); checkbox.disabled = batchWorkspace.busy;
+    checkbox.setAttribute("aria-label", `选择 ${entry.key}`);
+    checkbox.addEventListener("change", () => { if (checkbox.checked) batchWorkspace.selected.add(entry.key); else batchWorkspace.selected.delete(entry.key); tile.dataset.selected = String(checkbox.checked); batchUpdateActions(); });
+    label.append(checkbox); picture.append(image, imageError, label);
+    const title = document.createElement("strong"); title.className = "batch-title"; title.textContent = entry.name;
+    const id = document.createElement("span"); id.className = "batch-id"; id.textContent = entry.key; id.title = entry.error || entry.key;
+    const foot = document.createElement("div"); foot.className = "batch-tile-foot";
+    const status = document.createElement("span"); status.textContent = statuses[entry.status]; if (entry.status === "error") status.classList.add("is-error");
+    const edit = document.createElement("button"); edit.type = "button"; edit.className = "secondary"; edit.textContent = "精修"; edit.disabled = batchWorkspace.busy;
+    edit.addEventListener("click", () => batchEdit(entry));
+    foot.append(status, edit); tile.append(picture, title, id, foot); batchUi.Grid.append(tile);
+  });
+  batchUi.Page.textContent = `${batchWorkspace.page + 1} / ${pages}`;
+  batchUi.Prev.disabled = batchWorkspace.busy || batchWorkspace.page === 0;
+  batchUi.Next.disabled = batchWorkspace.busy || batchWorkspace.page >= pages - 1;
+  batchUpdateActions();
+}
+function batchStyleSummary() {
+  const values = batchWorkspace.base?.values || batchValues();
+  const option = [...controls.gameFont.options].find(option => option.value === values.gameFont);
+  batchUi.Style.textContent = `${option?.textContent || "当前字体"} · Size ${values.titleSize}% · Curve ${values.titleCurve}% · ${values.theme.toUpperCase()}`;
+}
+function batchShow(mode) {
+  batchWorkspace.mode = mode;
+  batchUi.Panel.hidden = mode !== "batch";
+  document.querySelector(".workspace").hidden = mode === "batch";
+  batchUi.Context.hidden = mode !== "editor" || !batchWorkspace.editing;
+  batchUi.Entry.setAttribute("aria-pressed", String(mode === "batch"));
+  [controls.png, controls.webp, controls.exportFilename].forEach(el => { el.disabled = mode === "batch"; });
+  if (mode === "batch") { batchStyleSummary(); batchRender(); }
+  requestAnimationFrame(updateTransformOverlays);
+}
+function batchCanSwitch() {
+  if (batchWorkspace.busy) return false;
+  if (controls.aiCleanupSection.classList.contains("is-busy")) { batchNotify("请等待当前图片的 AI 处理完成。", true); return false; }
+  return true;
+}
+async function batchStoreEdit() {
+  const entry = batchWorkspace.entries.find(entry => entry.key === batchWorkspace.editing);
+  if (!entry) return;
+  await loadTitleFont(); drawPoster();
+  const source = await batchSourceBlob(poster.image);
+  const output = await canvasToBlob(batchExportType());
+  const draft = batchNewDraft(entry, source);
+  entry.draft = draft; batchSetOutput(entry, output); entry.status = "edited"; entry.error = "";
+}
+function batchSetBusy(busy, cancellable = false) {
+  batchWorkspace.busy = busy;
+  batchUi.Panel.setAttribute("aria-busy", String(busy));
+  batchUi.Cancel.hidden = !busy || !cancellable;
+  for (const el of [batchUi.Entry, batchUi.Back, batchUi.Reset, batchUi.Adjust, batchUi.Load, batchUi.Url, batchUi.Files, batchUi.SelectPage, batchUi.SelectAll, batchUi.Clear, batchUi.Search, batchUi.Format, batchUi.Common, batchUi.Protect, batchUi.Save, batchUi.EditorPrev, batchUi.EditorNext]) el.disabled = busy;
+  batchRender();
+}
+async function batchReturnToList() {
+  if (!batchCanSwitch()) return;
+  batchSetBusy(true);
+  try {
+    await batchStoreEdit(); batchWorkspace.editing = null;
+    if (batchWorkspace.personal) batchRestoreEditor(batchWorkspace.personal);
+    batchWorkspace.personal = null;
+    batchShow("batch");
+  } catch (error) { batchNotify(error.message, true); }
+  finally { batchSetBusy(false); }
+}
+async function batchEdit(entry) {
+  if (!batchCanSwitch()) return;
+  batchSetBusy(true);
+  const previous = batchCaptureEditor();
+  const previousKey = batchWorkspace.editing;
+  try {
+    if (previousKey) await batchStoreEdit();
+    else batchWorkspace.personal = previous;
+    const template = batchWorkspace.base || batchGetTemplate();
+    await batchLoadEntry(entry, template, true);
+    batchWorkspace.editing = entry.key;
+    batchUi.Current.textContent = `批量精修 · ${entry.name} · ${batchWorkspace.entries.indexOf(entry) + 1}/${batchWorkspace.entries.length}`;
+    openControlSection("game"); document.querySelector('[data-tab-target="gameTitleTuningPanel"]').click();
+    batchShow("editor");
+  } catch (error) {
+    batchRestoreEditor(previous); batchWorkspace.editing = previousKey;
+    if (!previousKey) batchWorkspace.personal = null;
+    entry.error = error.message; if (!entry.preview) entry.status = "error";
+    batchNotify(`${entry.name}：${error.message}`, true);
+  } finally { batchSetBusy(false); }
+}
+async function batchOpen() {
+  if (!batchCanSwitch()) return;
+  if (batchWorkspace.editing) { await batchReturnToList(); return; }
+  batchWorkspace.base = batchGetTemplate();
+  batchShow("batch");
+}
+
+batchUi.Entry.addEventListener("click", () => { if (batchWorkspace.mode === "batch") batchShow("editor"); else batchOpen(); });
+batchUi.Back.addEventListener("click", () => batchShow("editor"));
+batchUi.Adjust.addEventListener("click", () => { batchShow("editor"); batchNotify("调整后再次点批量导入，即使用新的排版。先查看原图并处理旧标题。 "); });
+batchUi.Save.addEventListener("click", batchReturnToList);
+batchUi.Reset.addEventListener("click", () => {
+  if (!batchCanSwitch()) return;
+  if (batchWorkspace.entries.some(entry => entry.draft) && !window.confirm("清空当前批次？尚未导出的精修稿也会移除。")) return;
+  batchWorkspace.entries.forEach(entry => { if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl); if (entry.localUrl) URL.revokeObjectURL(entry.localUrl); });
+  batchWorkspace.entries = []; batchWorkspace.selected.clear(); batchWorkspace.page = 0; batchWorkspace.query = ""; batchUi.Search.value = "";
+  batchRender(); batchStatus("已清空批次，可以重新导入。");
+});
+for (const [button, step] of [[batchUi.EditorPrev, -1], [batchUi.EditorNext, 1]]) button.addEventListener("click", () => {
+  const index = batchWorkspace.entries.findIndex(entry => entry.key === batchWorkspace.editing);
+  batchEdit(batchWorkspace.entries[(index + step + batchWorkspace.entries.length) % batchWorkspace.entries.length]);
+});
+batchUi.Search.addEventListener("input", () => { batchWorkspace.query = batchUi.Search.value; batchWorkspace.page = 0; batchRender(); });
+batchUi.Prev.addEventListener("click", () => { batchWorkspace.page--; batchRender(); });
+batchUi.Next.addEventListener("click", () => { batchWorkspace.page++; batchRender(); });
+batchUi.SelectPage.addEventListener("click", () => { batchPageEntries().forEach(entry => batchWorkspace.selected.add(entry.key)); batchRender(); });
+batchUi.SelectAll.addEventListener("click", () => { batchFiltered().forEach(entry => batchWorkspace.selected.add(entry.key)); batchRender(); });
+batchUi.Clear.addEventListener("click", () => { batchWorkspace.selected.clear(); batchRender(); });
+batchUi.Load.addEventListener("click", async () => {
+  if (!batchCanSwitch()) return;
+  batchSetBusy(true, true); batchWorkspace.controller = new AbortController(); batchStatus("正在读取厂商清单…");
+  try {
+    const response = await fetch(apiUrl(`api/batch/catalog?url=${encodeURIComponent(batchUi.Url.value.trim())}`), { signal: batchWorkspace.controller.signal });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "清单读取失败。");
+    if (!Array.isArray(result.games)) throw new Error("清单没有 games 数据。");
+    const keys = new Set(batchWorkspace.entries.map(entry => entry.key)); let added = 0;
+    result.games.forEach(game => { if (!keys.has(game.key)) { batchWorkspace.entries.push({ ...game, status: "ready" }); keys.add(game.key); added++; } });
+    batchWorkspace.page = 0;
+    batchStatus(`新增 ${added} 个游戏 · 保留已有精修稿${result.skipped ? ` · 跳过 ${result.skipped} 条重复或无效记录` : ""}`);
+  } catch (error) { batchStatus(error.name === "AbortError" ? "已取消读取。" : error.message, error.name !== "AbortError"); }
+  finally { batchWorkspace.controller = null; batchSetBusy(false); }
+});
+batchUi.Files.addEventListener("change", async event => {
+  const files = [...event.target.files]; if (!files.length || !batchCanSwitch()) return;
+  batchSetBusy(true); let added = 0;
+  try {
+    for (const file of files) {
+      if (!/^image\/(png|jpeg|webp)$/.test(file.type)) continue;
+      const id = file.name.replace(/\.[^.]+$/, "");
+      const key = `local:${file.name}:${file.size}:${file.lastModified}`;
+      if (batchWorkspace.entries.some(entry => entry.key === key)) continue;
+      batchWorkspace.entries.push({ key, id, name: id.replace(/[_-]+/g, " "), producer: controls.producer.value || "LOCAL", folder: "local", file, localUrl: URL.createObjectURL(file), status: "ready" });
+      batchWorkspace.selected.add(key); added++;
+    }
+    batchStatus(`已加入 ${added} 张本地图片 · 图片保留在当前浏览器中`);
+  } finally { batchUi.Files.value = ""; batchSetBusy(false); }
+});
+batchUi.Cancel.addEventListener("click", () => { batchWorkspace.cancelled = true; batchWorkspace.controller?.abort(); batchStatus("正在停止，当前图片完成后返回…"); });
+batchUi.Generate.addEventListener("click", async () => {
+  if (!batchCanSwitch()) return;
+  const entries = batchCounts().selected.slice(); const saved = batchCaptureEditor();
+  const template = batchWorkspace.base || batchGetTemplate();
+  batchWorkspace.cancelled = false; batchSetBusy(true, true); let completed = 0, failed = 0, skipped = 0;
+  try {
+    for (let index = 0; index < entries.length; index++) {
+      if (batchWorkspace.cancelled) break;
+      const entry = entries[index];
+      if (batchUi.Protect.checked && ["edited", "approved"].includes(entry.status)) { skipped++; continue; }
+      batchStatus(`正在生成 ${index + 1}/${entries.length} · ${entry.name}`);
+      try {
+        await batchLoadEntry(entry, template, !batchUi.Common.checked && Boolean(entry.draft));
+        const draft = batchNewDraft(entry); const output = await canvasToBlob(batchExportType());
+        entry.draft = draft; batchSetOutput(entry, output); entry.status = "generated"; entry.error = ""; completed++;
+      } catch (error) { entry.error = error.message; if (!entry.preview) entry.status = "error"; failed++; }
+      batchRender(); await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  } finally {
+    batchRestoreEditor(saved); batchSetBusy(false);
+    batchStatus(`${batchWorkspace.cancelled ? "已停止 · " : ""}生成 ${completed} 张 · 保留 ${skipped} 张 · 失败 ${failed} 张${failed ? "，可重新选择失败项重试" : ""}`, failed > 0);
+  }
+});
+batchUi.Approve.addEventListener("click", () => {
+  let approved = 0;
+  batchCounts().selected.forEach(entry => { if (entry.preview) { entry.status = "approved"; approved++; } });
+  batchStatus(`已将所选 ${approved} 张标记通过。`); batchRender();
+});
+
+// Store-mode ZIP: PNG/WebP are already compressed. No library or network dependency.
+const batchCrcTable = Uint32Array.from({ length: 256 }, (_, value) => {
+  for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  return value >>> 0;
+});
+function batchCrc32(bytes) { let crc = 0xffffffff; for (const byte of bytes) crc = batchCrcTable[(crc ^ byte) & 255] ^ (crc >>> 8); return (crc ^ 0xffffffff) >>> 0; }
+function batchZipHeader(length) { const bytes = new Uint8Array(length); return { bytes, view: new DataView(bytes.buffer) }; }
+async function batchZip(files) {
+  if (files.length > 65535) throw new Error("单个压缩包最多 65535 张。请分批导出。");
+  const chunks = [], central = []; let offset = 0;
+  for (const file of files) {
+    const data = new Uint8Array(await file.blob.arrayBuffer()); const name = new TextEncoder().encode(file.name); const crc = batchCrc32(data);
+    if (offset + data.length + name.length + 30 > 0xffffffff) throw new Error("压缩包超过 4 GB，请分批导出。");
+    const local = batchZipHeader(30); const l = local.view;
+    l.setUint32(0, 0x04034b50, true); l.setUint16(4, 20, true); l.setUint16(6, 0x800, true); l.setUint16(12, 33, true);
+    l.setUint32(14, crc, true); l.setUint32(18, data.length, true); l.setUint32(22, data.length, true); l.setUint16(26, name.length, true);
+    const directory = batchZipHeader(46); const c = directory.view;
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x800, true); c.setUint16(14, 33, true);
+    c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true); c.setUint16(28, name.length, true); c.setUint32(42, offset, true);
+    chunks.push(local.bytes, name, data); central.push(directory.bytes, name); offset += 30 + name.length + data.length;
+  }
+  const size = central.reduce((total, chunk) => total + chunk.length, 0);
+  if (offset + size > 0xffffffff) throw new Error("压缩包超过 4 GB，请分批导出。");
+  const end = batchZipHeader(22); const e = end.view;
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, size, true); e.setUint32(16, offset, true);
+  return new Blob([...chunks, ...central, end.bytes], { type: "application/zip" });
+}
+function batchSafePath(value) { return (sanitizeExportFileName(value) || "poster").replace(/\.+$/g, ""); }
+function batchUniqueName(entry, extension, seen) {
+  const folder = batchSafePath(entry.folder || entry.producer || "local"); const stem = batchSafePath(entry.id);
+  let name = `${folder}/${stem}.${extension}`; let suffix = 2;
+  while (seen.has(name.toLowerCase())) name = `${folder}/${stem}-${suffix++}.${extension}`;
+  seen.add(name.toLowerCase()); return name;
+}
+async function batchConvert(blob, type) {
+  if (blob.type === type) return blob;
+  const image = await batchBlobImage(blob); const output = document.createElement("canvas"); output.width = poster.width; output.height = poster.height;
+  output.getContext("2d").drawImage(image, 0, 0);
+  return new Promise((resolve, reject) => output.toBlob(result => result ? resolve(result) : reject(new Error("图片格式转换失败。")), type, 0.94));
+}
+batchUi.Export.addEventListener("click", async () => {
+  if (!batchCanSwitch()) return;
+  const approved = batchCounts().approved.slice(); if (!approved.length) return;
+  batchSetBusy(true, true); batchWorkspace.cancelled = false;
+  try {
+    const files = [], seen = new Set(); const type = batchExportType();
+    for (let i = 0; i < approved.length; i++) {
+      if (batchWorkspace.cancelled) { batchStatus("已取消导出。"); return; }
+      batchStatus(`正在打包 ${i + 1}/${approved.length}…`);
+      const entry = approved[i]; const blob = await batchConvert(entry.preview, type);
+      const extension = blob.type === "image/webp" ? "webp" : "png";
+      files.push({ name: batchUniqueName(entry, extension, seen), blob });
+    }
+    const zip = await batchZip(files);
+    const url = URL.createObjectURL(zip); const link = document.createElement("a");
+    link.href = url; link.download = `posters-${new Date().toISOString().slice(0, 10)}.zip`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+    batchStatus(`已导出 ${files.length} 张 · 按厂商 / 游戏 ID 保存。`);
+  } catch (error) { batchStatus(error.message, true); }
+  finally { batchSetBusy(false); }
+});
+batchUi.Format.addEventListener("change", batchUpdateActions);
+window.addEventListener("beforeunload", event => { if (batchWorkspace.entries.some(entry => entry.draft) || batchWorkspace.busy) { event.preventDefault(); event.returnValue = ""; } });
+batchRender();

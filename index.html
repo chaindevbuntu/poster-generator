@@ -17,6 +17,7 @@
       <header class="topbar">
         <h1 class="wordmark">Poster Forge</h1>
         <span class="export-size">427 × 575</span>
+        <button id="batchEntry" class="secondary batch-entry" type="button" aria-pressed="false">批量导入</button>
         <div class="topbar-actions">
           <label class="topbar-field" for="exportFilenameInput">
             <span>File</span>
@@ -446,6 +447,41 @@
           </div>
         </aside>
       </main>
+      <section id="batchPanel" class="batch-panel" aria-label="批量导入" hidden>
+        <div class="batch-heading">
+          <div><h2>批量导入</h2><span class="batch-muted">导入 → 套用当前排版 → 逐张精修 → 批量导出</span></div>
+          <div class="batch-heading-actions"><button id="batchReset" class="ghost" type="button">清空批次</button><button id="batchBack" class="secondary" type="button">返回工作台</button></div>
+        </div>
+        <div class="batch-source">
+          <label for="batchUrl"><span>厂商 JSON</span><input id="batchUrl" type="url" value="https://cdn.zmsfnxxx.xyz/l/playtech.json" spellcheck="false" /></label>
+          <button id="batchLoad" class="primary" type="button">读取清单</button><span class="batch-muted">或</span>
+          <label class="batch-file secondary">本地多图<input id="batchFiles" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="导入本地多张图片" /></label>
+        </div>
+        <div class="batch-body">
+          <div class="batch-library">
+            <div class="batch-tools"><input id="batchSearch" type="search" aria-label="搜索游戏名称或 ID" placeholder="搜索游戏名称 / ID" /><button id="batchSelectPage" class="ghost" type="button">全选本页</button><button id="batchSelectAll" class="ghost" type="button">全选搜索结果</button><button id="batchClear" class="ghost" type="button">清空选择</button></div>
+            <div id="batchGrid" class="batch-grid"></div>
+            <div class="batch-pages"><span id="batchCount" class="batch-muted"></span><button id="batchPrev" class="ghost" type="button">上一页</button><span id="batchPage"></span><button id="batchNext" class="ghost" type="button">下一页</button></div>
+          </div>
+          <aside class="batch-settings">
+            <h3>使用工作台的排版</h3><div id="batchStyle" class="batch-style"></div>
+            <button id="batchAdjust" class="secondary" type="button">回工作台调整排版</button>
+            <label class="batch-check"><input id="batchCommon" type="checkbox" checked />套用当前工作台设置</label>
+            <label class="batch-check"><input id="batchProtect" type="checkbox" checked />保留已精修和已通过稿</label>
+            <p class="batch-muted">统一字体、弧度、颜色、渐变和厂商布局。每张图片、名称与裁切单独保留；Logo 使用工作台当前选择。</p>
+            <button id="batchGenerate" class="primary" type="button">生成所选预览</button><hr />
+            <label for="batchFormat">导出格式<select id="batchFormat"><option value="webp">WebP</option><option value="png">PNG</option></select></label>
+            <p class="batch-muted">检查后标记通过，再打包导出。原图旧标题请在精修时用去字工具处理。</p>
+            <button id="batchApprove" class="secondary" type="button">所选标记通过</button>
+            <span id="batchSummary" class="batch-muted"></span>
+          </aside>
+        </div>
+        <footer class="batch-footer"><span id="batchStatus" role="status" aria-live="polite">读取清单后选择游戏，或直接加入本地图片。</span><div><button id="batchCancel" class="secondary" type="button" hidden>停止</button><button id="batchExport" class="primary" type="button">导出所选已通过 · ZIP</button></div></footer>
+        <p class="batch-session-note">本批次保存在当前页面中，关闭或刷新前请先导出。</p>
+      </section>
+      <footer id="batchContext" class="batch-context" hidden><span id="batchCurrent"></span><div><button id="batchEditorPrev" class="ghost" type="button">上一张</button><button id="batchEditorNext" class="ghost" type="button">下一张</button><button id="batchSave" class="primary" type="button">保存并返回批量</button></div></footer>
+      <div id="batchMessage" class="batch-message" role="status" aria-live="polite" hidden></div>
+
     </div>
 
     <script src="./script.js"></script>
