@@ -362,9 +362,9 @@
               <input class="range-value" data-range-for="titleOutlineInput" type="text" inputmode="numeric" value="100%" aria-label="Game name outline percentage" />
             </label>
             <label class="range-field">
-              <span>Game name height</span>
+              <span>Game name vertical</span>
               <input id="titlePositionInput" type="range" min="-120" max="90" value="0" />
-              <input class="range-value" data-range-for="titlePositionInput" type="text" inputmode="numeric" value="0%" aria-label="Game name height percentage" />
+              <input class="range-value" data-range-for="titlePositionInput" type="text" inputmode="numeric" value="0%" aria-label="Game name vertical position" />
             </label>
             <label class="range-field">
               <span>Game name horizontal</span>
@@ -373,9 +373,10 @@
             </label>
             <label class="range-field">
               <span>Game name size</span>
-              <input id="titleSizeInput" type="range" min="60" max="300" value="100" />
+              <input id="titleSizeInput" aria-describedby="titleSizeHint" type="range" min="60" max="300" value="100" />
               <input class="range-value" data-range-for="titleSizeInput" type="text" inputmode="numeric" value="100%" aria-label="Game name size percentage" />
             </label>
+            <p class="source-status" id="titleSizeHint">Width fits automatically as size increases.</p>
             <label class="range-field">
               <span>Game name spacing</span>
               <input id="titleSpacingInput" type="range" min="-4" max="24" value="0" />

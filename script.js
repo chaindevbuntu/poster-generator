@@ -606,7 +606,7 @@ function splitTitleLines(text, style, maxWidth, startingSize) {
 
   ctx.font = titleFont(startingSize, style);
 
-  if (measureTitleLine(text) <= maxWidth && !style.stackShortTitles) {
+  if (!style.stackShortTitles && (words.length <= 2 || measureTitleLine(text) <= maxWidth)) {
     return [text];
   }
 
@@ -617,10 +617,6 @@ function splitTitleLines(text, style, maxWidth, startingSize) {
   return getLineCandidates(words, style.maxLines).sort(
     (a, b) => scoreTitleLines(a, maxWidth) - scoreTitleLines(b, maxWidth),
   )[0];
-}
-
-function fitTitleLines(lines, maxWidth, startingSize, style) {
-  return startingSize;
 }
 
 /* Casino game titles arch by roughly 15-20% of their cap height, which is about
@@ -637,7 +633,7 @@ function getCurveOffset(x, halfWidth, curveDepth) {
   return curveDepth * (1 / 3 - normalized * normalized);
 }
 
-function drawCurvedLine(line, y, maxWidth, fontSize, curveAmount, letterSpacing, drawText) {
+function getTitleGlyphLayout(line, y, fontSize, curveAmount, letterSpacing) {
   const characters = Array.from(line);
   const isCurved = Math.abs(curveAmount) >= 0.01;
   const totalWidth = isCurved
@@ -648,26 +644,25 @@ function drawCurvedLine(line, y, maxWidth, fontSize, curveAmount, letterSpacing,
   let cursor = -halfWidth;
   let prefix = "";
 
-  characters.forEach((character, index) => {
+  return characters.map((character, index) => {
     const characterWidth = ctx.measureText(character).width;
     prefix += character;
-    // Keep the font's pair kerning when placing characters on the curve.
-    const centerX = isCurved
+    const x = isCurved
       ? -halfWidth + ctx.measureText(prefix).width - characterWidth / 2 + index * letterSpacing
       : cursor + characterWidth / 2;
-    const centerY = y - getCurveOffset(centerX, halfWidth, curveDepth);
-
-    ctx.save();
-    ctx.translate(centerX, centerY);
-    if (isCurved && halfWidth > 0) {
-      // Rotate each glyph to follow the tangent of the same parabolic baseline.
-      const slope = 2 * curveDepth * centerX / (halfWidth * halfWidth);
-      ctx.rotate(Math.atan(slope));
-    }
-    drawText(character, 0, 0);
-    ctx.restore();
-
+    const slope = isCurved && halfWidth > 0 ? 2 * curveDepth * x / (halfWidth * halfWidth) : 0;
     cursor += characterWidth + letterSpacing;
+    return { character, x, y: y - getCurveOffset(x, halfWidth, curveDepth), angle: Math.atan(slope) };
+  });
+}
+
+function drawCurvedLine(line, y, maxWidth, fontSize, curveAmount, letterSpacing, drawText) {
+  getTitleGlyphLayout(line, y, fontSize, curveAmount, letterSpacing).forEach((glyph) => {
+    ctx.save();
+    ctx.translate(glyph.x, glyph.y);
+    if (glyph.angle) ctx.rotate(glyph.angle);
+    drawText(glyph.character, 0, 0);
+    ctx.restore();
   });
 }
 
@@ -693,14 +688,50 @@ function fillTitleLine(line, y, maxWidth, fontSize, curveAmount, letterSpacing) 
   });
 }
 
+// Measure the ink (including rotated glyph corners), rather than just advances.
+// Only x is fitted: the chosen letter height remains unchanged.
+function getTitleWidthScale(line, fontSize, curveAmount, letterSpacing, maxWidth, outlineWidth, shadowPadding) {
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  let extent = 0;
+
+  const include = (text, x, angle) => {
+    const metrics = ctx.measureText(text);
+    const left = Number.isFinite(metrics.actualBoundingBoxLeft) ? metrics.actualBoundingBoxLeft : metrics.width / 2;
+    const right = Number.isFinite(metrics.actualBoundingBoxRight) ? metrics.actualBoundingBoxRight : metrics.width / 2;
+    const ascent = Number.isFinite(metrics.actualBoundingBoxAscent) ? metrics.actualBoundingBoxAscent : fontSize * 0.8;
+    const descent = Number.isFinite(metrics.actualBoundingBoxDescent) ? metrics.actualBoundingBoxDescent : fontSize * 0.2;
+    for (const localX of [-left, right]) {
+      for (const localY of [-ascent, descent]) {
+        extent = Math.max(extent, Math.abs(x + localX * Math.cos(angle) - localY * Math.sin(angle)));
+      }
+    }
+  };
+
+  if (Math.abs(curveAmount) < 0.01 && Math.abs(letterSpacing) < 0.01) {
+    include(line, 0, 0);
+  } else {
+    getTitleGlyphLayout(line, 0, fontSize, curveAmount, letterSpacing).forEach((glyph) => {
+      include(glyph.character, glyph.x, glyph.angle);
+    });
+  }
+  ctx.restore();
+  // Canvas shadows keep their pixel radius under a transform, so reserve them
+  // outside the scaled ink. Never enlarge a short line to fill the available width.
+  const available = Math.max(1, maxWidth - shadowPadding * 2);
+  return Math.min(1, available / Math.max(1, extent * 2 + outlineWidth + 2));
+}
+
 function drawGameTitle() {
   const title = controls.game.value.trim().toUpperCase() || "GAME NAME";
   const style = getTitleStyle();
   const maxWidth = poster.width * style.maxWidth;
   const titleScale = clampRangeValue(controls.titleSize.value, controls.titleSize) / 100;
-  const startingSize = poster.width * style.baseSize * titleScale;
-  const lines = splitTitleLines(title, style, maxWidth, startingSize);
-  const fontSize = fitTitleLines(lines, maxWidth, startingSize, style);
+  const referenceSize = poster.width * style.baseSize;
+  // Decide line breaks at a stable reference size, not on every Size adjustment.
+  const lines = splitTitleLines(title, style, maxWidth, referenceSize);
+  const fontSize = referenceSize * titleScale;
   const x = poster.width / 2 + parseControlNumber(controls.titleHorizontal);
   const y = poster.height * style.y + parseControlNumber(controls.titlePosition);
   const lineSizes = lines.map((_, index) => fontSize * getTitleLineScale(index));
@@ -723,15 +754,25 @@ function drawGameTitle() {
   ctx.shadowColor = style.shadow;
   ctx.shadowBlur = fontSize * style.shadowBlurScale;
   ctx.shadowOffsetY = fontSize * style.shadowOffsetScale;
+  const outlineWidth = outlineAmount > 0 ? Math.max(1, fontSize * style.strokeScale * outlineAmount) : 0;
+  const widthScales = lines.map((line, index) => {
+    const lineSize = lineSizes[index];
+    ctx.font = titleFont(lineSize, style);
+    const shadowPadding = 2 * Math.max(ctx.shadowBlur, 4, lineSize * 0.04) + 1;
+    return getTitleWidthScale(line, lineSize, curveAmount, letterSpacing, maxWidth, outlineWidth, shadowPadding);
+  });
 
   if (outlineAmount > 0) {
-    ctx.lineWidth = Math.max(1, fontSize * style.strokeScale * outlineAmount);
+    ctx.lineWidth = outlineWidth;
     let lineTop = -totalLineHeight / 2;
     lines.forEach((line, index) => {
       const lineSize = lineSizes[index];
       const lineY = lineTop + lineHeights[index] / 2;
       ctx.font = titleFont(lineSize, style);
+      ctx.save();
+      ctx.scale(widthScales[index], 1);
       drawTitleLine(line, lineY, maxWidth, lineSize, curveAmount, letterSpacing);
+      ctx.restore();
       lineTop += lineHeights[index] + rowSpacing;
     });
   }
@@ -745,7 +786,10 @@ function drawGameTitle() {
     ctx.font = titleFont(lineSize, style);
     ctx.shadowBlur = Math.max(4, lineSize * 0.04);
     ctx.shadowOffsetY = Math.max(2, lineSize * 0.02);
+    ctx.save();
+    ctx.scale(widthScales[index], 1);
     fillTitleLine(line, lineY, maxWidth, lineSize, curveAmount, letterSpacing);
+    ctx.restore();
     lineTop += lineHeights[index] + rowSpacing;
   });
   ctx.restore();
