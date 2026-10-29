@@ -55,6 +55,7 @@ const controls = {
   titlePosition: document.querySelector("#titlePositionInput"),
   titleHorizontal: document.querySelector("#titleHorizontalInput"),
   titleSize: document.querySelector("#titleSizeInput"),
+  titleFit: document.querySelector("#titleFitInput"),
   titleSpacing: document.querySelector("#titleSpacingInput"),
   titleLineOneSize: document.querySelector("#titleLineOneSizeInput"),
   titleLineTwoSize: document.querySelector("#titleLineTwoSizeInput"),
@@ -119,6 +120,7 @@ const settingsCache = {
     "titlePosition",
     "titleHorizontal",
     "titleSize",
+    "titleFit",
     "titleSpacing",
     "titleLineOneSize",
     "titleLineTwoSize",
@@ -221,8 +223,8 @@ const titleLayout = {
   stroke: "theme",
   strokeAlpha: 0.55,
   strokeScale: 0.05,
-  shadow: "rgba(0, 0, 0, 0.24)",
-  shadowBlurScale: 0.04,
+  shadow: "rgba(0, 0, 0, 0.16)",
+  shadowBlurScale: 0.02,
   shadowOffsetScale: 0.02,
   skew: 0,
   baseSize: 0.14,
@@ -301,6 +303,7 @@ function getBackdropBlurSource() {
 }
 
 function invalidateBackdropBlur() {
+  workbenchImageRevision = (workbenchImageRevision || 0) + 1;
   backdrop.blurSource = null;
 }
 
@@ -734,14 +737,22 @@ function drawGameTitle() {
   const fontSize = referenceSize * titleScale;
   const x = poster.width / 2 + parseControlNumber(controls.titleHorizontal);
   const y = poster.height * style.y + parseControlNumber(controls.titlePosition);
-  const lineSizes = lines.map((_, index) => fontSize * getTitleLineScale(index));
-  const lineHeights = lineSizes.map((lineSize) => lineSize * style.lineHeight);
-  const rowSpacing = clampRangeValue(controls.titleRowSpacing.value, controls.titleRowSpacing);
-  const totalLineHeight =
-    lineHeights.reduce((sum, lineHeight) => sum + lineHeight, 0) + rowSpacing * Math.max(0, lines.length - 1);
   const curveAmount = clampRangeValue(controls.titleCurve.value, controls.titleCurve) / 100;
   const outlineAmount = clampRangeValue(controls.titleOutline.value, controls.titleOutline) / 100;
   const letterSpacing = getTitleSpacing();
+  const outlineWidth = outlineAmount > 0 ? Math.max(1, fontSize * style.strokeScale * outlineAmount) : 0;
+  const requestedSizes = lines.map((_, index) => fontSize * getTitleLineScale(index));
+  const requiredScales = requestedSizes.map((size, index) => {
+    ctx.save(); ctx.font = titleFont(size, style);
+    const scale = getTitleWidthScale(lines[index], size, curveAmount, letterSpacing, maxWidth, outlineWidth, 2 * Math.max(2, size * .02) + 1);
+    ctx.restore(); return scale;
+  });
+  const preserveShape = controls.titleFit.value === "natural";
+  const lineSizes = requestedSizes.map((size, index) => size * (preserveShape ? requiredScales[index] : 1));
+  const lineHeights = lineSizes.map(size => size * style.lineHeight);
+  const rowSpacing = clampRangeValue(controls.titleRowSpacing.value, controls.titleRowSpacing);
+  const totalLineHeight = lineHeights.reduce((sum, height) => sum + height, 0) + rowSpacing * Math.max(0, lines.length - 1);
+  workbenchTitleMetrics = { compression: Math.min(...requiredScales), lines: lines.length };
 
   ctx.save();
   ctx.translate(x, y);
@@ -754,7 +765,6 @@ function drawGameTitle() {
   ctx.shadowColor = style.shadow;
   ctx.shadowBlur = fontSize * style.shadowBlurScale;
   ctx.shadowOffsetY = fontSize * style.shadowOffsetScale;
-  const outlineWidth = outlineAmount > 0 ? Math.max(1, fontSize * style.strokeScale * outlineAmount) : 0;
   const widthScales = lines.map((line, index) => {
     const lineSize = lineSizes[index];
     ctx.font = titleFont(lineSize, style);
@@ -770,8 +780,9 @@ function drawGameTitle() {
       const lineY = lineTop + lineHeights[index] / 2;
       ctx.font = titleFont(lineSize, style);
       ctx.save();
-      ctx.scale(widthScales[index], 1);
-      drawTitleLine(line, lineY, maxWidth, lineSize, curveAmount, letterSpacing);
+      ctx.translate(0, lineY);
+      ctx.scale(widthScales[index], preserveShape ? widthScales[index] : 1);
+      drawTitleLine(line, 0, maxWidth, lineSize, curveAmount, letterSpacing);
       ctx.restore();
       lineTop += lineHeights[index] + rowSpacing;
     });
@@ -784,11 +795,12 @@ function drawGameTitle() {
     const lineSize = lineSizes[index];
     const lineY = lineTop + lineHeights[index] / 2;
     ctx.font = titleFont(lineSize, style);
-    ctx.shadowBlur = Math.max(4, lineSize * 0.04);
-    ctx.shadowOffsetY = Math.max(2, lineSize * 0.02);
+    ctx.shadowBlur = Math.max(2, lineSize * 0.02);
+    ctx.shadowOffsetY = Math.max(1, lineSize * 0.012);
     ctx.save();
-    ctx.scale(widthScales[index], 1);
-    fillTitleLine(line, lineY, maxWidth, lineSize, curveAmount, letterSpacing);
+    ctx.translate(0, lineY);
+      ctx.scale(widthScales[index], preserveShape ? widthScales[index] : 1);
+    fillTitleLine(line, 0, maxWidth, lineSize, curveAmount, letterSpacing);
     ctx.restore();
     lineTop += lineHeights[index] + rowSpacing;
   });
@@ -820,6 +832,7 @@ function drawPoster() {
   }
 
   updateTransformOverlays();
+  document.dispatchEvent(new Event("poster:render"));
 }
 
 const editorLayers = {
@@ -2263,6 +2276,8 @@ function loadSavedSettings() {
       cachedSettings.values.gameFont = previousStyle?.value || defaultTitleFont;
     }
 
+    // Existing saved posters keep their previous width-fit behaviour.
+    if (!cachedSettings.values.titleFit) cachedSettings.values.titleFit = "compress";
     settingsCache.fields.forEach((field) => {
       const control = controls[field];
       const savedValue = cachedSettings.values[field];
@@ -2675,6 +2690,7 @@ controls.deleteProducerPreset.addEventListener("click", () => {
   controls.titlePosition,
   controls.titleHorizontal,
   controls.titleSize,
+  controls.titleFit,
   controls.titleSpacing,
   controls.titleLineOneSize,
   controls.titleLineTwoSize,
@@ -2869,6 +2885,9 @@ async function batchLoadEntry(entry, template, useDraft = false) {
   const background = draft ? draft.backdrop : template.backdrop;
   backdrop.image = background.image;
   backdrop.imageTransform = background.imageTransform && { ...background.imageTransform };
+  if (!draft && batchUi.AutoColor.checked) {
+    try { const colours = workbenchPalette(image); if (colours.length) { controls.theme.value = colours[0]; syncThemeCode(); } } catch { /* Keep the chosen theme if pixels cannot be sampled. */ }
+  }
   if (!draft) {
     controls.game.value = entry.draft?.values.game || entry.name;
     controls.producer.value = entry.producer.toUpperCase();
@@ -2878,6 +2897,11 @@ async function batchLoadEntry(entry, template, useDraft = false) {
   setBackgroundSourceStatus(""); setCleanupStatus(""); setAiCleanupStatus("");
   invalidateBackdropBlur();
   await loadTitleFont();
+  if (draft?.cleanupMask) {
+    setCleanupMode(true);
+    controls.cleanupMask.getContext("2d").drawImage(await batchBlobImage(draft.cleanupMask), 0, 0);
+    backgroundEdit.strokeBounds = draft.cleanupBounds && { ...draft.cleanupBounds };
+  }
   drawPoster();
 }
 function batchSetOutput(entry, blob) {
@@ -2893,7 +2917,7 @@ function batchNewDraft(entry, source = null) {
 }
 function batchFiltered() {
   const query = batchWorkspace.query.trim().toLowerCase();
-  return batchWorkspace.entries.filter(entry => `${entry.name} ${entry.id} ${entry.producer}`.toLowerCase().includes(query));
+  return batchWorkspace.entries.filter(entry => `${entry.name} ${entry.id} ${entry.producer}`.toLowerCase().includes(query) && (batchUi.Filter.value === "all" || entry.status === batchUi.Filter.value));
 }
 function batchPageEntries() { return batchFiltered().slice(batchWorkspace.page * batchPageSize, (batchWorkspace.page + 1) * batchPageSize); }
 function batchCounts() {
@@ -2909,6 +2933,7 @@ function batchUpdateActions() {
   batchUi.Export.disabled = batchWorkspace.busy || !approved.length;
   batchUi.Export.textContent = `导出所选已通过 ${approved.length} 张 · ZIP`;
   batchUi.Summary.textContent = `共 ${batchWorkspace.entries.length} 张 · 已通过 ${totalApproved} 张`;
+  workbenchScheduleSave();
 }
 function batchRender() {
   const filtered = batchFiltered();
@@ -2926,7 +2951,7 @@ function batchRender() {
     const tile = document.createElement("article"); tile.className = "batch-tile"; tile.dataset.selected = String(batchWorkspace.selected.has(entry.key));
     const picture = document.createElement("div"); picture.className = "batch-picture";
     const image = document.createElement("img"); image.alt = entry.name; image.loading = "lazy";
-    image.src = entry.previewUrl || entry.localUrl || batchProxyUrl(entry.imageUrl);
+    image.src = (!batchUi.Original.checked && entry.previewUrl) || entry.localUrl || batchProxyUrl(entry.imageUrl);
     const imageError = document.createElement("span"); imageError.className = "batch-image-error"; imageError.textContent = "图片未能读取\n可点精修重试"; imageError.hidden = true;
     image.onerror = () => { image.hidden = true; imageError.hidden = false; };
     const label = document.createElement("label"); const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.checked = batchWorkspace.selected.has(entry.key); checkbox.disabled = batchWorkspace.busy;
@@ -2960,6 +2985,7 @@ function batchShow(mode) {
   [controls.png, controls.webp, controls.exportFilename].forEach(el => { el.disabled = mode === "batch"; });
   if (mode === "batch") { batchStyleSummary(); batchRender(); }
   requestAnimationFrame(updateTransformOverlays);
+  workbenchFontSamples(); workbenchScheduleSave();
 }
 function batchCanSwitch() {
   if (batchWorkspace.busy) return false;
@@ -2970,22 +2996,28 @@ async function batchStoreEdit() {
   const entry = batchWorkspace.entries.find(entry => entry.key === batchWorkspace.editing);
   if (!entry) return;
   await loadTitleFont(); drawPoster();
-  const source = await batchSourceBlob(poster.image);
-  const output = await canvasToBlob(batchExportType());
-  const draft = batchNewDraft(entry, source);
+  const stamp = workbenchEditStamp();
+  const draft = batchNewDraft(entry);
+  draft.cleanupBounds = backgroundEdit.strokeBounds && { ...backgroundEdit.strokeBounds };
+  const [source, output, mask] = await Promise.all([batchSourceBlob(poster.image), canvasToBlob(batchExportType()), backgroundEdit.cleanupActive ? batchSourceBlob(controls.cleanupMask) : null]);
+  draft.source = source;
+  draft.cleanupMask = mask;
   entry.draft = draft; batchSetOutput(entry, output); entry.status = "edited"; entry.error = "";
+  workbenchEntryStored(stamp);
 }
 function batchSetBusy(busy, cancellable = false) {
   batchWorkspace.busy = busy;
+  document.querySelector(".workspace").inert = busy;
   batchUi.Panel.setAttribute("aria-busy", String(busy));
   batchUi.Cancel.hidden = !busy || !cancellable;
-  for (const el of [batchUi.Entry, batchUi.Back, batchUi.Reset, batchUi.Adjust, batchUi.Load, batchUi.Url, batchUi.Files, batchUi.SelectPage, batchUi.SelectAll, batchUi.Clear, batchUi.Search, batchUi.Format, batchUi.Common, batchUi.Protect, batchUi.Save, batchUi.EditorPrev, batchUi.EditorNext]) el.disabled = busy;
+  for (const el of [batchUi.Entry, batchUi.Back, batchUi.Reset, batchUi.Adjust, batchUi.Load, batchUi.Url, batchUi.Files, batchUi.SelectPage, batchUi.SelectAll, batchUi.Clear, batchUi.Search, batchUi.Format, batchUi.Common, batchUi.Protect, batchUi.Save, batchUi.EditorPrev, batchUi.EditorNext, batchUi.ApproveNext, batchUi.Filter, batchUi.Original, batchUi.AutoColor]) el.disabled = busy;
   batchRender();
 }
 async function batchReturnToList() {
   if (!batchCanSwitch()) return;
   batchSetBusy(true);
   try {
+    await workbenchWaitForAutosave();
     await batchStoreEdit(); batchWorkspace.editing = null;
     if (batchWorkspace.personal) batchRestoreEditor(batchWorkspace.personal);
     batchWorkspace.personal = null;
@@ -2999,6 +3031,7 @@ async function batchEdit(entry) {
   const previous = batchCaptureEditor();
   const previousKey = batchWorkspace.editing;
   try {
+    await workbenchWaitForAutosave();
     if (previousKey) await batchStoreEdit();
     else batchWorkspace.personal = previous;
     const template = batchWorkspace.base || batchGetTemplate();
@@ -3163,5 +3196,268 @@ batchUi.Export.addEventListener("click", async () => {
   finally { batchSetBusy(false); }
 });
 batchUi.Format.addEventListener("change", batchUpdateActions);
-window.addEventListener("beforeunload", event => { if (batchWorkspace.entries.some(entry => entry.draft) || batchWorkspace.busy) { event.preventDefault(); event.returnValue = ""; } });
+window.addEventListener("beforeunload", event => { if (batchWorkspace.busy || workbenchSavePending()) { event.preventDefault(); event.returnValue = ""; } });
 batchRender();
+
+var workbenchTitleMetrics, workbenchImageRevision;
+// Shared controls remain the source of truth for fonts, colour and saved layouts.
+var workbenchReady = false, workbenchRestoring = false, workbenchTimer, workbenchRevision = 0;
+var workbenchSavedRevision = 0, workbenchSavePromise = null, workbenchAutoPromise = null;
+var workbenchAutoTimer, workbenchActiveDirty = false, workbenchObservedStamp = "";
+var workbenchDbPromise, workbenchTemplates = [], workbenchSignatures = new Map();
+const workbenchMediaCache = new WeakMap();
+const workbenchObjectIds = new WeakMap(); let workbenchObjectSequence = 0;
+const workbenchUi = Object.fromEntries(["fontSample", "fontBrowser", "fontCategory", "fontChoices", "paletteSuggest", "paletteSwatches", "paletteStatus", "titleFitStatus", "titleSuggestBreak", "showTitleSafe", "titleSafeArea", "layoutSelect", "layoutName", "layoutApply", "layoutSave", "layoutDelete", "layoutStatus", "layoutCount"].map(id => [id, document.getElementById(id)]));
+let workbenchFavorites;
+try { workbenchFavorites = new Set(JSON.parse(localStorage.getItem("posterFavoriteFonts") || "[]")); } catch { workbenchFavorites = new Set(); }
+
+function workbenchFontSamples() {
+  const text = (controls.game.value || "GAME NAME").replaceAll("/", "\n").toUpperCase();
+  const option = controls.gameFont.selectedOptions[0];
+  workbenchUi.fontSample.textContent = text;
+  workbenchUi.fontSample.style.fontFamily = option.value;
+  workbenchUi.fontSample.style.fontWeight = option.dataset.weight || "900";
+  if (!workbenchUi.fontBrowser.open) return;
+  const category = workbenchUi.fontCategory.value;
+  workbenchUi.fontChoices.replaceChildren();
+  [...controls.gameFont.options].filter(option => category === "all" || (category === "favorite" ? workbenchFavorites.has(option.value) : option.parentElement.label === category)).forEach(option => {
+    const row = document.createElement("div"); row.className = "font-choice";
+    const choose = document.createElement("button"); choose.type = "button"; choose.className = "font-choice-main";
+    choose.setAttribute("aria-pressed", String(option.value === controls.gameFont.value));
+    const label = document.createElement("span"); label.textContent = option.textContent;
+    const sample = document.createElement("span"); sample.textContent = text.replaceAll("\n", " / "); sample.style.fontFamily = option.value; sample.style.fontWeight = option.dataset.weight || "900";
+    choose.append(label, sample); choose.addEventListener("click", () => { controls.gameFont.value = option.value; controls.gameFont.dispatchEvent(new Event("input", { bubbles: true })); });
+    const favorite = document.createElement("button"); favorite.type = "button"; favorite.textContent = workbenchFavorites.has(option.value) ? "★" : "☆";
+    favorite.setAttribute("aria-label", `收藏 ${option.textContent}`); favorite.setAttribute("aria-pressed", String(workbenchFavorites.has(option.value)));
+    favorite.addEventListener("click", () => {
+      if (workbenchFavorites.has(option.value)) workbenchFavorites.delete(option.value); else workbenchFavorites.add(option.value);
+      try { localStorage.setItem("posterFavoriteFonts", JSON.stringify([...workbenchFavorites])); } catch { batchNotify("无法保存字体收藏。", true); }
+      workbenchFontSamples();
+    });
+    row.append(choose, favorite); workbenchUi.fontChoices.append(row);
+  });
+  if (!workbenchUi.fontChoices.children.length) workbenchUi.fontChoices.textContent = "还没有收藏，点字体旁的 ☆ 即可加入。";
+}
+workbenchUi.fontBrowser.addEventListener("toggle", workbenchFontSamples);
+workbenchUi.fontCategory.addEventListener("change", workbenchFontSamples);
+controls.game.addEventListener("input", workbenchFontSamples);
+controls.gameFont.addEventListener("input", workbenchFontSamples);
+
+function workbenchToLab(r, g, b) {
+  const linear = v => { v /= 255; return v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; };
+  r = linear(r); g = linear(g); b = linear(b);
+  const l = Math.cbrt(.4122214708*r + .5363325363*g + .0514459929*b);
+  const m = Math.cbrt(.2119034982*r + .6806995451*g + .1073969566*b);
+  const s = Math.cbrt(.0883024619*r + .2817188376*g + .6299787005*b);
+  return [.2104542553*l + .793617785*m - .0040720468*s, 1.9779984951*l - 2.428592205*m + .4505937099*s, .0259040371*l + .7827717662*m - .808675766*s];
+}
+function workbenchLabHex(L, C, hue) {
+  const a = C*Math.cos(hue), b = C*Math.sin(hue);
+  const l = (L + .3963377774*a + .2158037573*b)**3;
+  const m = (L - .1055613458*a - .0638541728*b)**3;
+  const s = (L - .0894841775*a - 1.291485548*b)**3;
+  const gamma = value => Math.round(Math.min(1, Math.max(0, value <= .0031308 ? 12.92*value : 1.055*value**(1/2.4)-.055))*255).toString(16).padStart(2,"0");
+  return "#" + [4.0767416621*l-3.3077115913*m+.2309699292*s, -1.2684380046*l+2.6097574011*m-.3413193965*s, -.0041960863*l-.7034186147*m+1.707614701*s].map(gamma).join("");
+}
+function workbenchPalette(image) {
+  const sample = document.createElement("canvas"); sample.width = 64; sample.height = 64;
+  const context = sample.getContext("2d", { willReadFrequently: true }); context.drawImage(image, 0, 0, 64, 64);
+  const pixels = context.getImageData(0,0,64,64).data, bins = new Map();
+  for (let i=0; i<pixels.length; i+=4) {
+    if (pixels[i+3]<200) continue;
+    const key = (pixels[i]>>4)*256 + (pixels[i+1]>>4)*16 + (pixels[i+2]>>4);
+    const bin = bins.get(key) || [0,0,0,0]; bin[0]+=pixels[i]; bin[1]+=pixels[i+1]; bin[2]+=pixels[i+2]; bin[3]++; bins.set(key,bin);
+  }
+  const candidates = [...bins.values()].map(([r,g,b,n]) => { const [L,a,c]=workbenchToLab(r/n,g/n,b/n); const C=Math.hypot(a,c); return { L,C,h:Math.atan2(c,a),score:n*(.1+C) }; })
+    .filter(p => p.L>.2 && p.L<.92 && p.C>.035).sort((a,b)=>b.score-a.score);
+  const chosen=[];
+  for (const p of candidates) {
+    if (chosen.every(q=>Math.abs(Math.atan2(Math.sin(p.h-q.h),Math.cos(p.h-q.h)))>.48)) chosen.push(p);
+    if (chosen.length===5) break;
+  }
+  if (!chosen.length) return [];
+  const colours=chosen.map(p=>workbenchLabHex(Math.min(.7,Math.max(.5,p.L)),Math.min(.18,Math.max(.09,p.C)),p.h));
+  for (const lightness of [.48,.6,.7]) if (colours.length<3) colours.push(workbenchLabHex(lightness,Math.min(.14,chosen[0].C),chosen[0].h));
+  return [...new Set(colours)];
+}
+workbenchUi.paletteSuggest.addEventListener("click", () => {
+  if (!poster.image) { workbenchUi.paletteStatus.textContent="请先导入一张图片。"; return; }
+  try {
+    const colours=workbenchPalette(poster.image); workbenchUi.paletteSwatches.replaceChildren();
+    colours.forEach(colour=>{const button=document.createElement("button");button.type="button";button.setAttribute("aria-label",`使用推荐色 ${colour}`);button.setAttribute("aria-pressed",String(controls.theme.value===colour));button.title=colour;
+      const swatch=document.createElement("span");swatch.style.backgroundColor=colour;button.append(swatch);
+      button.addEventListener("click",()=>{controls.theme.value=colour;controls.theme.dispatchEvent(new Event("input",{bubbles:true}));workbenchUi.paletteSwatches.querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",String(b===button)));});workbenchUi.paletteSwatches.append(button);});
+    workbenchUi.paletteStatus.textContent=colours.length?"从原图提取，点选后统一主题色与渐变。":"这张图片偏中性，建议手动选色。";
+  } catch { workbenchUi.paletteStatus.textContent="图片不允许取色，请改为上传本地文件。"; }
+});
+workbenchUi.showTitleSafe.addEventListener("change",()=>{workbenchUi.titleSafeArea.hidden=!workbenchUi.showTitleSafe.checked;});
+function workbenchTitleHint() {
+  if (!workbenchTitleMetrics) return;
+  const {compression,lines}=workbenchTitleMetrics;
+  workbenchUi.titleFitStatus.textContent=compression<.72?(controls.titleFit.value==="natural"?"已等比缩小以保留字形；可分行来放大文字。":"标题横向压缩较多，建议分行或选择保留字形。"): `当前 ${lines} 行 · 标题位于安全宽度内`;
+  workbenchUi.titleFitStatus.classList.toggle("is-warning",compression<.72);
+}
+workbenchUi.titleSuggestBreak.addEventListener("click",()=>{
+  const text=controls.game.value.replaceAll("/"," ").trim().toUpperCase();if(!text)return;
+  const style={...getTitleStyle(),stackShortTitles:true}; const size=poster.width*style.baseSize*Number(controls.titleSize.value)/100;
+  controls.game.value=splitTitleLines(text,style,poster.width*style.maxWidth,size).join(" / ");controls.game.dispatchEvent(new Event("input",{bubbles:true}));
+});
+
+function workbenchDatabase() {
+  if (!workbenchDbPromise) workbenchDbPromise=new Promise((resolve,reject)=>{
+    if(!window.indexedDB){reject(new Error("浏览器不支持本地草稿存储。"));return;}
+    const request=indexedDB.open("posterForgeWorkspace",1);
+    request.onupgradeneeded=()=>{for(const name of ["entries","workspace","templates"])request.result.createObjectStore(name);};
+    request.onerror=()=>reject(request.error);request.onblocked=()=>reject(new Error("请关闭旧版工作台标签页后再试。"));
+    request.onsuccess=()=>{const db=request.result;db.onversionchange=()=>{db.close();workbenchDbPromise=null;};resolve(db);};
+  }).catch(error=>{workbenchDbPromise=null;throw error;});
+  return workbenchDbPromise;
+}
+async function workbenchTransaction(stores,mode,action) {
+  const db=await workbenchDatabase();
+  return new Promise((resolve,reject)=>{const tx=db.transaction(stores,mode);let result;tx.oncomplete=()=>resolve(result);tx.onabort=()=>reject(tx.error||new Error("本地存储写入失败。"));tx.onerror=()=>reject(tx.error);try{result=action(tx);}catch(error){tx.abort();reject(error);}});
+}
+async function workbenchReadStore(name) {
+  const db=await workbenchDatabase();return new Promise((resolve,reject)=>{const tx=db.transaction(name,"readonly");const request=tx.objectStore(name).getAll();request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+}
+async function workbenchMediaBlob(image) {
+  if(!image)return null;
+  if(image instanceof HTMLCanvasElement)return batchSourceBlob(image);
+  if(!workbenchMediaCache.has(image))workbenchMediaCache.set(image,batchSourceBlob(image));
+  return workbenchMediaCache.get(image);
+}
+async function workbenchPackTemplate(template) {
+  if(!template)return null;
+  return {values:{...template.values},logo:{dataUrl:template.logo.dataUrl,fileName:template.logo.fileName},backdrop:{image:await workbenchMediaBlob(template.backdrop.image),imageTransform:template.backdrop.imageTransform&&{...template.backdrop.imageTransform}}};
+}
+async function workbenchUnpackTemplate(template) {
+  if(!template)return null;
+  return {values:template.values,logo:{...template.logo,image:template.logo.dataUrl?await batchImage(template.logo.dataUrl):null},backdrop:{...template.backdrop,image:template.backdrop.image?await batchBlobImage(template.backdrop.image):null}};
+}
+async function workbenchPackEntry(entry) {
+  const value={...entry};delete value.localUrl;delete value.previewUrl;
+  if(entry.draft)value.draft={...entry.draft,...await workbenchPackTemplate(entry.draft)};
+  return value;
+}
+async function workbenchUnpackEntry(value) {
+  const entry={...value};
+  if(entry.file)entry.localUrl=URL.createObjectURL(entry.file);
+  if(entry.preview)entry.previewUrl=URL.createObjectURL(entry.preview);
+  if(entry.draft)entry.draft={...entry.draft,...await workbenchUnpackTemplate(entry.draft)};
+  return entry;
+}
+function workbenchSignature(entry) { return [entry.status,entry.preview,entry.draft,entry.error]; }
+function workbenchSameSignature(a,b) { return a&&b&&a.length===b.length&&a.every((v,i)=>v===b[i]); }
+function workbenchDraftStatus(text,error=false) { batchUi.DraftStatus.textContent=text;batchUi.DraftStatus.classList.toggle("is-error",error); }
+function workbenchScheduleSave() {
+  if(!workbenchReady||workbenchRestoring)return;
+  workbenchRevision++;clearTimeout(workbenchTimer);workbenchDraftStatus("草稿保存中…");
+  workbenchTimer=setTimeout(()=>workbenchFlush().catch(()=>{}),650);
+}
+function workbenchSavePending() { return workbenchRevision!==workbenchSavedRevision||workbenchActiveDirty||Boolean(workbenchAutoPromise); }
+async function workbenchFlush() {
+  clearTimeout(workbenchTimer);
+  if(workbenchSavePromise)return workbenchSavePromise;
+  if(!workbenchReady||workbenchRestoring||workbenchRevision===workbenchSavedRevision)return;
+  const revision=workbenchRevision;
+  workbenchSavePromise=(async()=>{
+    const entries=batchWorkspace.entries.map(entry=>({...entry}));const keys=new Set(entries.map(entry=>entry.key));
+    const changed=entries.filter(entry=>!workbenchSameSignature(workbenchSignatures.get(entry.key),workbenchSignature(entry)));
+    const signatures=changed.map(entry=>[entry.key,workbenchSignature(entry)]);
+    const meta={version:1,order:entries.map(entry=>entry.key),selected:[...batchWorkspace.selected],page:batchWorkspace.page,query:batchWorkspace.query,status:batchUi.Filter.value,mode:batchWorkspace.mode,editing:batchWorkspace.editing,format:batchUi.Format.value,common:batchUi.Common.checked,protect:batchUi.Protect.checked,autoColor:batchUi.AutoColor.checked,base:await workbenchPackTemplate(batchWorkspace.base),savedAt:Date.now()};
+    const packed=await Promise.all(changed.map(workbenchPackEntry));
+    await workbenchTransaction(["entries","workspace"],"readwrite",tx=>{const store=tx.objectStore("entries");for(const key of workbenchSignatures.keys())if(!keys.has(key))store.delete(key);packed.forEach(entry=>store.put(entry,entry.key));tx.objectStore("workspace").put(meta,"current");});
+    for(const key of workbenchSignatures.keys())if(!keys.has(key))workbenchSignatures.delete(key);
+    signatures.forEach(([key,signature])=>workbenchSignatures.set(key,signature));workbenchSavedRevision=revision;
+    workbenchDraftStatus(workbenchActiveDirty||workbenchAutoPromise?"精修草稿保存中…":`草稿已保存 · ${new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})} · 仅此浏览器`);
+  })();
+  try{await workbenchSavePromise;}catch(error){workbenchDraftStatus("自动保存失败，请先导出或点重新保存。",true);throw error;}
+  finally{workbenchSavePromise=null;if(workbenchRevision!==revision){clearTimeout(workbenchTimer);workbenchTimer=setTimeout(()=>workbenchFlush().catch(()=>{}),650);}}
+}
+function workbenchObjectId(object) {if(!object)return 0;if(!workbenchObjectIds.has(object))workbenchObjectIds.set(object,++workbenchObjectSequence);return workbenchObjectIds.get(object);}
+function workbenchEditStamp() {return JSON.stringify([batchWorkspace.editing,batchValues(),poster.imageTransform,backdrop.imageTransform,workbenchObjectId(poster.image),workbenchObjectId(backdrop.image),poster.producerLogoDataUrl,workbenchImageRevision,backgroundEdit.cleanupActive,backgroundEdit.strokeBounds]);}
+function workbenchEntryStored(stamp) {if(workbenchEditStamp()===stamp)workbenchActiveDirty=false;workbenchScheduleSave();}
+async function workbenchSaveActive() {
+  if(workbenchAutoPromise)return workbenchAutoPromise;
+  if(!batchWorkspace.editing||!workbenchActiveDirty||batchWorkspace.busy)return;
+  workbenchAutoPromise=batchStoreEdit();
+  let succeeded=false;
+  try{await workbenchAutoPromise;succeeded=true;}catch(error){workbenchDraftStatus("精修草稿保存失败，请手动保存或先导出。",true);throw error;}
+  finally{workbenchAutoPromise=null;if(succeeded&&workbenchActiveDirty&&batchWorkspace.editing&&!batchWorkspace.busy){clearTimeout(workbenchAutoTimer);workbenchAutoTimer=setTimeout(()=>workbenchSaveActive().catch(()=>{}),300);}}
+}
+async function workbenchWaitForAutosave() {clearTimeout(workbenchAutoTimer);if(workbenchAutoPromise)await workbenchAutoPromise;}
+document.addEventListener("poster:render",()=>{
+  if(!workbenchReady||workbenchRestoring)return;
+  workbenchTitleHint();
+  if(batchWorkspace.busy||!batchWorkspace.editing)return;
+  const stamp=workbenchEditStamp();if(stamp===workbenchObservedStamp)return;
+  workbenchObservedStamp=stamp;workbenchActiveDirty=true;clearTimeout(workbenchAutoTimer);
+  workbenchAutoTimer=setTimeout(()=>workbenchSaveActive().catch(()=>{}),900);
+});
+batchUi.DraftSave.addEventListener("click",async()=>{try{await workbenchSaveActive();workbenchScheduleSave();await workbenchFlush();}catch(error){batchNotify(error.message,true);}});
+controls.cleanupMask.addEventListener("pointerup",()=>queueMicrotask(()=>document.dispatchEvent(new Event("poster:render"))));
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden")workbenchSaveActive().then(workbenchFlush).catch(()=>{});});
+
+function workbenchRenderTemplates() {
+  const selected=workbenchUi.layoutSelect.value;workbenchUi.layoutSelect.replaceChildren(new Option("选择排版模板",""));
+  workbenchTemplates.forEach(template=>workbenchUi.layoutSelect.add(new Option(template.name,template.id)));
+  if(workbenchTemplates.some(template=>template.id===selected))workbenchUi.layoutSelect.value=selected;
+  workbenchUi.layoutCount.textContent=String(workbenchTemplates.length);workbenchTemplateActions();
+}
+function workbenchTemplateActions(){const selected=workbenchTemplates.some(t=>t.id===workbenchUi.layoutSelect.value);workbenchUi.layoutApply.disabled=!selected;workbenchUi.layoutDelete.disabled=!selected;}
+workbenchUi.layoutSelect.addEventListener("change",workbenchTemplateActions);
+workbenchUi.layoutSave.addEventListener("click",async()=>{
+  const name=workbenchUi.layoutName.value.trim();if(!name){workbenchUi.layoutStatus.textContent="请先填写模板名称。";return;}
+  workbenchUi.layoutSave.disabled=true;
+  try{const template={id:crypto.randomUUID(),name,template:await workbenchPackTemplate(batchGetTemplate())};await workbenchTransaction(["templates"],"readwrite",tx=>tx.objectStore("templates").put(template,template.id));workbenchTemplates.push(template);workbenchRenderTemplates();workbenchUi.layoutSelect.value=template.id;workbenchTemplateActions();workbenchUi.layoutStatus.textContent="已保存完整排版。";}
+  catch(error){workbenchUi.layoutStatus.textContent=`保存失败：${error.message}`;}
+  finally{workbenchUi.layoutSave.disabled=false;}
+});
+workbenchUi.layoutApply.addEventListener("click",async()=>{
+  const saved=workbenchTemplates.find(t=>t.id===workbenchUi.layoutSelect.value);if(!saved||!batchCanSwitch())return;
+  workbenchUi.layoutApply.disabled=true;
+  try{const template=await workbenchUnpackTemplate(saved.template);const name=controls.game.value,filename=controls.exportFilename.value,producer=controls.producer.value;
+    // A template changes layout, not the current game or the image's crop/backdrop.
+    const values=Object.fromEntries(Object.entries(template.values).filter(([key])=>!batchExtraFields.includes(key)));
+    batchApplyValues(values);controls.game.value=name;controls.exportFilename.value=filename;controls.producer.value=producer;
+    poster.producerLogo=template.logo.image;poster.producerLogoDataUrl=template.logo.dataUrl;poster.producerLogoFileName=template.logo.fileName;
+    controls.producerLogoLabel.textContent=template.logo.fileName||"Optional: replaces producer text";
+    if(!batchWorkspace.editing){try{if(template.logo.dataUrl)localStorage.setItem(producerLogoCache.key,JSON.stringify({savedAt:Date.now(),name:template.logo.fileName,dataUrl:template.logo.dataUrl}));else localStorage.removeItem(producerLogoCache.key);}catch{workbenchUi.layoutStatus.textContent="排版已套用，浏览器未能保存 Logo 缓存。";}}
+    saveSettings();await loadTitleFont();drawPoster();workbenchFontSamples();workbenchUi.layoutStatus.textContent="已套用，所有参数仍可单独调整。";
+  }catch(error){workbenchUi.layoutStatus.textContent=`套用失败：${error.message}`;}finally{workbenchTemplateActions();}
+});
+workbenchUi.layoutDelete.addEventListener("click",async()=>{const id=workbenchUi.layoutSelect.value;try{await workbenchTransaction(["templates"],"readwrite",tx=>tx.objectStore("templates").delete(id));workbenchTemplates=workbenchTemplates.filter(t=>t.id!==id);workbenchRenderTemplates();workbenchUi.layoutStatus.textContent="已删除模板。";}catch(error){workbenchUi.layoutStatus.textContent=error.message;}});
+
+batchUi.Filter.addEventListener("change",()=>{batchWorkspace.page=0;batchRender();});
+batchUi.Original.addEventListener("change",batchRender);
+batchUi.AutoColor.addEventListener("change",workbenchScheduleSave);
+for(const el of [batchUi.Common,batchUi.Protect,batchUi.Format])el.addEventListener("change",workbenchScheduleSave);
+batchUi.ApproveNext.addEventListener("click",async()=>{
+  if(!batchCanSwitch()||!batchWorkspace.editing)return;
+  const key=batchWorkspace.editing;const entry=batchWorkspace.entries.find(e=>e.key===key);
+  const index=batchWorkspace.entries.indexOf(entry);const next=batchWorkspace.entries.slice(index+1).find(e=>e.status!=="approved");
+  await batchReturnToList();if(batchWorkspace.editing)return;
+  entry.status="approved";batchRender();batchStatus(`已通过 · ${entry.name}`);
+  if(next)await batchEdit(next);else batchNotify("后续游戏已全部检查，已返回批量列表。");
+});
+async function workbenchStart() {
+  workbenchRestoring=true;batchUi.Entry.disabled=true;workbenchDraftStatus("正在读取本地草稿…");
+  let meta;
+  try{
+    const [metadata,records,templates]=await Promise.all([workbenchReadStore("workspace"),workbenchReadStore("entries"),workbenchReadStore("templates")]);
+    workbenchTemplates=templates;workbenchRenderTemplates();meta=metadata.find(record=>record.version===1);
+    if(meta){
+      const order=new Map((meta.order||[]).map((key,index)=>[key,index]));
+      batchWorkspace.entries=await Promise.all(records.filter(record=>typeof record.key==="string").sort((a,b)=>(order.get(a.key)??Infinity)-(order.get(b.key)??Infinity)).map(workbenchUnpackEntry));
+      const keys=new Set(batchWorkspace.entries.map(entry=>entry.key));batchWorkspace.selected=new Set(meta.selected.filter(key=>keys.has(key)));
+      batchWorkspace.page=meta.page||0;batchWorkspace.query=meta.query||"";batchUi.Search.value=batchWorkspace.query;batchUi.Filter.value=meta.status||"all";
+      batchUi.Format.value=meta.format||"webp";batchUi.Common.checked=meta.common!==false;batchUi.Protect.checked=meta.protect!==false;batchUi.AutoColor.checked=Boolean(meta.autoColor);
+      batchWorkspace.base=await workbenchUnpackTemplate(meta.base);batchWorkspace.entries.forEach(entry=>workbenchSignatures.set(entry.key,workbenchSignature(entry)));
+      if(meta.mode==="batch"||meta.editing)batchShow("batch");else batchRender();
+      workbenchDraftStatus(`已恢复 ${batchWorkspace.entries.length} 张 · 草稿仅保存在此浏览器`);
+    }else{workbenchDraftStatus("草稿自动保存在此浏览器，支持刷新后恢复。");}
+  }catch(error){workbenchDraftStatus("本地存储不可用，请在关闭前先导出。",true);}
+  finally{workbenchReady=true;workbenchRestoring=false;batchUi.Entry.disabled=false;workbenchFontSamples();workbenchTitleHint();}
+  if(meta?.editing){const entry=batchWorkspace.entries.find(e=>e.key===meta.editing);if(entry)await batchEdit(entry);}
+}
+workbenchStart();

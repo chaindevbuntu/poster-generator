@@ -1047,3 +1047,42 @@ button:disabled:hover {
 @media (max-width: 900px) { .batch-body { grid-template-columns: minmax(0, 1fr); } .batch-settings { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .batch-settings h3, .batch-settings .batch-style, .batch-settings hr { grid-column: 1 / -1; } }
 @media (max-width: 760px) { .batch-entry { margin-left: auto; } .batch-panel { padding: .75rem; } .batch-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } .batch-source { flex-wrap: wrap; } .batch-source > label:first-child { flex-basis: 100%; } .batch-context { align-items: start; } .batch-heading h2 small { display: block; margin: .4rem 0 0; } .batch-picture, .batch-picture img { height: 165px; } .batch-settings { display: flex; } .batch-footer > div { width: 100%; } .batch-footer > div button:last-child { flex: 1; } }
 @media (max-width: 420px) { .export-size { display: none; } .topbar-actions { flex-wrap: wrap; } .topbar-field { min-width: 120px; } }
+
+/* Additional choices use the existing rails and controls. */
+.font-sample{font-size:24px;line-height:1.2;padding:.75rem .5rem;background:var(--surface-0);color:var(--ink);text-align:center;overflow-wrap:anywhere;white-space:pre-line;min-height:56px}
+.font-browser{border-top:1px solid var(--line-soft);padding-top:.5rem;min-width:0}
+.font-browser>summary{font-size:var(--text-xs);color:var(--ink-dim);padding:.35rem 0}
+.font-browser>.field{margin-top:.5rem}
+.font-choices{display:grid;gap:1px;margin-top:.5rem;background:var(--line-soft)}
+.font-choice{display:grid;grid-template-columns:minmax(0,1fr) 36px;gap:1px;background:var(--surface-1)}
+.font-choice button{min-width:0;background:var(--surface-1);text-transform:none;letter-spacing:normal;border:0}
+.font-choice button[aria-pressed=true]{background:var(--surface-3);color:var(--accent)}
+.font-choice-main{display:flex;flex-direction:column;align-items:start;padding:.5rem;gap:.3rem;text-align:left}
+.font-choice-main span:first-child{font-family:Archivo,"Segoe UI",sans-serif;font-size:11px;font-weight:400;color:var(--ink-dim)}
+.font-choice-main span:last-child{font-size:22px;line-height:1.15;white-space:normal;overflow-wrap:anywhere;max-width:100%}
+.palette-tools{display:grid;gap:.5rem}
+.palette-swatches{display:flex;gap:.4rem;flex-wrap:wrap}
+.palette-swatches button{width:40px;height:36px;padding:4px;background:var(--surface-2);border:1px solid var(--line)}
+.palette-swatches button[aria-pressed=true]{border-color:var(--ink)}
+.palette-swatches span{display:block;width:100%;height:100%}
+.title-fit-tools{display:grid;gap:.5rem;margin-bottom:.75rem}
+.title-fit-tools>label:first-child{display:grid;gap:.4rem;font-size:var(--text-xs);color:var(--ink-dim)}
+.title-fit-tools .safe-check{display:flex;gap:.5rem;align-items:center;font-size:12px;color:var(--ink-dim)}
+.safe-check input{width:16px;height:16px;accent-color:var(--accent)}
+.title-safe-area{position:absolute;inset:0 7%;border-left:1px dashed var(--accent);border-right:1px dashed var(--accent);pointer-events:none;z-index:1;opacity:.65}
+.layout-actions{display:flex;gap:.5rem}
+.layout-actions>button{flex:1}
+.layout-library .preset-manager-body>small{font-size:11px;line-height:1.6;color:var(--ink-dim)}
+.layout-library .preset-manager-body>input,.layout-library select{min-width:0;width:100%}
+.layout-library select,.title-fit-tools select{min-height:var(--control-height);width:100%;padding:.45rem .5rem;border:1px solid var(--line);border-radius:0;background:var(--surface-2);color:var(--ink);font:inherit}
+.batch-status-filter{display:grid;gap:.3rem;font-size:11px;color:var(--ink-dim);flex:0 1 125px}
+.batch-status-filter select{width:100%}
+.batch-draft-bar{display:flex;gap:.75rem;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:11px;color:var(--ink-dim)}
+.batch-draft-bar button{font-size:11px;min-height:30px;padding:.3rem .6rem}
+.batch-settings .batch-check{line-height:1.5}
+.batch-review-actions{display:flex;gap:.4rem;flex-wrap:wrap}
+.batch-review-actions button{min-width:0}
+.batch-original-tools{display:flex;align-items:center;gap:.5rem;font-size:11px;color:var(--ink-dim)}
+.batch-original-tools input{width:16px;height:16px;accent-color:var(--accent)}
+.source-status.is-warning{color:var(--accent)}
+@media(max-width:760px){.batch-status-filter{flex:1;min-width:125px}.batch-context>div{width:100%}.batch-review-actions{width:100%}.font-choice-main span:last-child{font-size:21px}}
