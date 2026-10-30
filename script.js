@@ -157,7 +157,20 @@ const tuningTabCache = {
   key: "gamePosterGeneratorActiveTuningTab",
 };
 
-const producerPresetConfig = { fields: ["producer"] };
+const producerPresetConfig = {
+  fields: [
+    "producer",
+    "producerFont",
+    "overlayProducer",
+    "producerPosition",
+    "producerHorizontal",
+    "producerNameVertical",
+    "producerLogoHorizontal",
+    "producerSize",
+    "producerLogoSize",
+    "showProducer",
+  ],
+};
 
 const exportLocationCache = {
   key: "gamePosterGeneratorLastExport",
@@ -2330,14 +2343,23 @@ function applyProducerPreset(preset) {
 
   if (preset.logo?.dataUrl) {
     setProducerLogo(preset.logo.dataUrl, preset.logo.fileName || "Saved logo");
+    // Records saved by the identity-only release may have no layout settings.
+    // An explicitly logo-only producer must not acquire the fallback PRODUCER text.
+    if (preset.settings?.overlayProducer === undefined && !preset.settings?.producer?.trim()) {
+      controls.overlayProducer.checked = false;
+    }
   } else {
     clearProducerLogo();
   }
 
   saveSettings();
+  updateAutoControlLocks();
   drawPoster();
   openControlSection("producer");
-  setProducerPresetStatus(`已套用厂商名称和 Logo；保留当前配色与排版。`);
+  const hasSavedLayout = producerPresetConfig.fields.some(field => field !== "producer" && preset.settings?.[field] !== undefined);
+  setProducerPresetStatus(hasSavedLayout
+    ? "已套用保存的厂商排版与 Logo；保留当前游戏颜色。"
+    : "已套用名称和 Logo；此记录未保存排版参数，调整后请重新保存。");
 }
 
 async function deleteProducerPreset(preset) {

@@ -66,7 +66,18 @@ const removeTextPromptPrefix = [
   "text is removed, continue the surrounding background behind it.",
 ].join(" ");
 
-const producerSettingFields = new Set(["producer"]);
+const producerSettingFields = new Set([
+  "producer",
+  "producerFont",
+  "overlayProducer",
+  "producerPosition",
+  "producerHorizontal",
+  "producerNameVertical",
+  "producerLogoHorizontal",
+  "producerSize",
+  "producerLogoSize",
+  "showProducer",
+]);
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
