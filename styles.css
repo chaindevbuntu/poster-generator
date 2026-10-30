@@ -1086,3 +1086,9 @@ button:disabled:hover {
 .batch-original-tools input{width:16px;height:16px;accent-color:var(--accent)}
 .source-status.is-warning{color:var(--accent)}
 @media(max-width:760px){.batch-status-filter{flex:1;min-width:125px}.batch-context>div{width:100%}.batch-review-actions{width:100%}.font-choice-main span:last-child{font-size:21px}}
+
+.cleanup-actions{display:flex;gap:.4rem;flex-wrap:wrap}
+.cleanup-actions>button{flex:1;min-width:60px}
+.detected-text-choices{display:flex;flex-wrap:wrap;gap:.35rem}
+.detected-text-choices button{font-size:11px;padding:.3rem .5rem;min-height:30px;text-transform:none;letter-spacing:normal;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.ocr-help,.producer-library-help{font-size:11px;line-height:1.6;color:var(--ink-dim)}

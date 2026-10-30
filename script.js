@@ -157,21 +157,7 @@ const tuningTabCache = {
   key: "gamePosterGeneratorActiveTuningTab",
 };
 
-const producerPresetConfig = {
-  fields: [
-    "producer",
-    "producerFont",
-    "overlayProducer",
-    "theme",
-    "producerPosition",
-    "producerHorizontal",
-    "producerNameVertical",
-    "producerLogoHorizontal",
-    "producerSize",
-    "producerLogoSize",
-    "showProducer",
-  ],
-};
+const producerPresetConfig = { fields: ["producer"] };
 
 const exportLocationCache = {
   key: "gamePosterGeneratorLastExport",
@@ -2348,12 +2334,10 @@ function applyProducerPreset(preset) {
     clearProducerLogo();
   }
 
-  syncThemeCode();
   saveSettings();
-  updateAutoControlLocks();
   drawPoster();
   openControlSection("producer");
-  setProducerPresetStatus(`Applied “${preset.name}”.`);
+  setProducerPresetStatus(`已套用厂商名称和 Logo；保留当前配色与排版。`);
 }
 
 async function deleteProducerPreset(preset) {
@@ -2988,6 +2972,7 @@ function batchShow(mode) {
   workbenchFontSamples(); workbenchScheduleSave();
 }
 function batchCanSwitch() {
+  if (titleOcr?.busy) { batchNotify("请等待自动识别完成，或先停止识别。", true); return false; }
   if (batchWorkspace.busy) return false;
   if (controls.aiCleanupSection.classList.contains("is-busy")) { batchNotify("请等待当前图片的 AI 处理完成。", true); return false; }
   return true;
@@ -3196,7 +3181,7 @@ batchUi.Export.addEventListener("click", async () => {
   finally { batchSetBusy(false); }
 });
 batchUi.Format.addEventListener("change", batchUpdateActions);
-window.addEventListener("beforeunload", event => { if (batchWorkspace.busy || workbenchSavePending()) { event.preventDefault(); event.returnValue = ""; } });
+window.addEventListener("beforeunload", event => { if (batchWorkspace.busy || titleOcr?.busy || workbenchSavePending()) { event.preventDefault(); event.returnValue = ""; } });
 batchRender();
 
 var workbenchTitleMetrics, workbenchImageRevision;
@@ -3461,3 +3446,174 @@ async function workbenchStart() {
   if(meta?.editing){const entry=batchWorkspace.entries.find(e=>e.key===meta.editing);if(entry)await batchEdit(entry);}
 }
 workbenchStart();
+
+// Optional, local OCR only proposes a mask. Pixels change only when Erase is pressed.
+var titleOcr = { busy: false, token: 0, worker: null, library: null, cancel: null };
+const titleOcrUi = {
+  detect: document.getElementById("detectTitleText"),
+  cancel: document.getElementById("cancelTitleDetect"),
+  choices: document.getElementById("detectedTextChoices"),
+};
+function titleOcrLibrary() {
+  if (window.Tesseract) return Promise.resolve(window.Tesseract);
+  if (!titleOcr.library) titleOcr.library = new Promise((resolve, reject) => {
+    const script = document.createElement("script"); script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js";
+    const timer = setTimeout(() => { script.remove(); titleOcr.library = null; reject(new Error("识别组件下载超时，请重试或手动涂抹。")); }, 30000);
+    script.onload = () => { clearTimeout(timer); resolve(window.Tesseract); };
+    script.onerror = () => { clearTimeout(timer); script.remove(); titleOcr.library = null; reject(new Error("无法下载识别组件，请检查网络或继续手动涂抹。")); };
+    document.head.append(script);
+  });
+  return titleOcr.library;
+}
+function titleOcrNormal(value) { return String(value || "").normalize("NFKD").toUpperCase().replace(/[^A-Z0-9]/g, ""); }
+function titleOcrSimilarity(a, b) {
+  if (a === b) return 1;
+  if (Math.min(a.length, b.length) < 4) return 0;
+  const previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let diagonal = previous[0]; previous[0] = i;
+    for (let j = 1; j <= b.length; j++) { const old = previous[j]; previous[j] = Math.min(previous[j] + 1, previous[j-1] + 1, diagonal + (a[i-1] === b[j-1] ? 0 : 1)); diagonal = old; }
+  }
+  return 1 - previous[b.length] / Math.max(a.length, b.length);
+}
+function titleOcrWords(data) {
+  return (data.blocks || []).flatMap(block => block.paragraphs || []).flatMap(paragraph => paragraph.lines || []).map(line => ({
+    text: line.text?.trim() || "", words: (line.words || []).filter(word => word.bbox && titleOcrNormal(word.text) && Number(word.confidence) >= 25), bbox: line.bbox,
+  })).filter(line => line.words.length);
+}
+function titleOcrMatch(lines, target) {
+  const fullTarget = titleOcrNormal(target);
+  if (fullTarget.length >= 3) {
+    const whole = lines.flatMap(line => line.words).find(word => titleOcrSimilarity(titleOcrNormal(word.text), fullTarget) >= .8);
+    if (whole) return [whole];
+    const line = lines.find(line => titleOcrSimilarity(titleOcrNormal(line.words.map(word => word.text).join("")), fullTarget) >= .85);
+    if (line) return line.words;
+  }
+  const tokens = target.split(/[\s/\-_:]+/).map(titleOcrNormal).filter(Boolean);
+  const words = lines.flatMap(line => line.words); const matches = new Set(), used = new Set(), candidates = []; let covered = 0;
+  for (const word of words) for (let start=0; start<tokens.length; start++) for(let end=start+1; end<=Math.min(tokens.length,start+4); end++) {
+    const text=tokens.slice(start,end).join("");const score=titleOcrSimilarity(text,titleOcrNormal(word.text));
+    if(score>=.72)candidates.push({word,start,end,score,length:text.length});
+  }
+  candidates.sort((a,b)=>b.score-a.score||b.length-a.length||b.word.confidence-a.word.confidence);
+  for(const item of candidates){if(matches.has(item.word)||Array.from({length:item.end-item.start},(_,i)=>item.start+i).some(i=>used.has(i)))continue;matches.add(item.word);covered+=item.length;for(let i=item.start;i<item.end;i++)used.add(i);}
+  const expected = tokens.reduce((sum, token) => sum + token.length, 0);
+  // Short stopwords alone are not evidence of the game's title.
+  const ordered=[...matches].sort((a,b)=>{
+    const overlap=Math.min(a.bbox.y1,b.bbox.y1)-Math.max(a.bbox.y0,b.bbox.y0);
+    return overlap>.4*Math.min(a.bbox.y1-a.bbox.y0,b.bbox.y1-b.bbox.y0)?a.bbox.x0-b.bbox.x0:a.bbox.y0-b.bbox.y0;
+  });
+  return expected && covered / expected >= .45 && ordered.some(word => titleOcrNormal(word.text).length >= 3) ? ordered : [];
+}
+function titleOcrContrast(input) {
+  const top = Math.round(input.height * .5), crop = document.createElement("canvas");
+  crop.width = input.width; crop.height = input.height - top;
+  const context = crop.getContext("2d", { willReadFrequently: true }); context.drawImage(input, 0, top, crop.width, crop.height, 0, 0, crop.width, crop.height);
+  const pixels = context.getImageData(0,0,crop.width,crop.height), width = crop.width, height = crop.height;
+  const gray = new Uint8Array(width * height), integral = new Float64Array((width+1)*(height+1));
+  for (let y=0; y<height; y++) { let row=0; for (let x=0; x<width; x++) { const i=y*width+x;gray[i]=Math.round(.299*pixels.data[i*4]+.587*pixels.data[i*4+1]+.114*pixels.data[i*4+2]);row+=gray[i];integral[(y+1)*(width+1)+x+1]=integral[y*(width+1)+x+1]+row; } }
+  const radius = Math.max(10, Math.round(width/35));
+  for (let y=0; y<height; y++) for (let x=0; x<width; x++) {
+    const left=Math.max(0,x-radius),right=Math.min(width,x+radius+1),a=Math.max(0,y-radius),b=Math.min(height,y+radius+1);
+    const sum=integral[b*(width+1)+right]-integral[a*(width+1)+right]-integral[b*(width+1)+left]+integral[a*(width+1)+left];
+    const value=gray[y*width+x]>sum/((right-left)*(b-a))+7?0:255;const i=(y*width+x)*4;
+    pixels.data[i]=pixels.data[i+1]=pixels.data[i+2]=value;pixels.data[i+3]=255;
+  }
+  context.putImageData(pixels,0,0);return { crop, top };
+}
+function titleOcrOffset(lines, offset) {
+  const box=b=>({...b,y0:b.y0+offset,y1:b.y1+offset});
+  return lines.map(line=>({...line,bbox:line.bbox&&box(line.bbox),words:line.words.map(word=>({...word,bbox:box(word.bbox),symbols:word.symbols?.map(symbol=>({...symbol,bbox:symbol.bbox&&box(symbol.bbox)}))}))}));
+}
+function titleOcrSelect(words, scaleX, scaleY, source, revision) {
+  if (poster.image !== source || workbenchImageRevision !== revision || !backgroundEdit.cleanupActive) { setCleanupStatus("图片或选区状态已改变，请重新识别。", true); return; }
+  clearCleanupMask(); const context = controls.cleanupMask.getContext("2d"); context.fillStyle = cleanupMaskPaint;
+  const width = source.width, height = source.height; let count = 0;
+  for (const word of words) {
+    const boxes = word.symbols?.filter(symbol => symbol.bbox && titleOcrNormal(symbol.text)).map(symbol => symbol.bbox) || [];
+    for (const box of boxes.length ? boxes : [word.bbox]) {
+      if (![box.x0,box.y0,box.x1,box.y1].every(Number.isFinite)) continue;
+      const padding = Math.max(1, Math.min(width, height) / 400);
+      const x0 = Math.max(0, Math.floor(box.x0 / scaleX - padding)), y0 = Math.max(0, Math.floor(box.y0 / scaleY - padding));
+      const x1 = Math.min(width, Math.ceil(box.x1 / scaleX + padding)), y1 = Math.min(height, Math.ceil(box.y1 / scaleY + padding));
+      if (x1 <= x0 || y1 <= y0) continue;
+      context.fillRect(x0, y0, x1-x0, y1-y0);
+      trackStrokeBounds(x0, y0, 0); trackStrokeBounds(x1, y1, 0); count++;
+    }
+  }
+  setCleanupStatus(count ? `已选中：${words.map(word => word.text.trim()).join(" ")}。确认红色选区后点 Erase；仍可补涂，Erase 后可 Undo。` : "没有可用的文字选区，请手动涂抹。", !count);
+  document.dispatchEvent(new Event("poster:render"));
+}
+function titleOcrBusy(busy) {
+  titleOcr.busy = busy;
+  titleOcrUi.detect.disabled = busy; titleOcrUi.cancel.hidden = !busy;
+  for (const control of [controls.applyCleanup, controls.clearCleanupMask, controls.undoCleanup, controls.toggleCleanup]) control.disabled = busy;
+  controls.cleanupMask.style.pointerEvents = busy ? "none" : "";
+  titleOcrUi.choices.querySelectorAll("button").forEach(button => { button.disabled = busy; });
+}
+async function detectGameTitleText() {
+  if (titleOcr.busy || batchWorkspace.busy || controls.aiCleanupSection.classList.contains("is-busy")) return;
+  const source = ensureWorkCanvas();
+  if (!source) { setCleanupStatus("请先导入原图。", true); return; }
+  if (backgroundEdit.strokeBounds) { setCleanupStatus("当前已有涂抹选区。请先 Erase 或 Clear，再自动识别，以免覆盖。", true); return; }
+  if (!backgroundEdit.cleanupActive) setCleanupMode(true);
+  const revision = workbenchImageRevision, token = ++titleOcr.token, target = controls.game.value;
+  const input = document.createElement("canvas");
+  const scale = Math.min(3, 1600 / Math.max(source.width, source.height));
+  input.width = Math.max(1, Math.round(source.width * scale)); input.height = Math.max(1, Math.round(source.height * scale));
+  input.getContext("2d").drawImage(source, 0, 0, input.width, input.height);
+  try { input.getContext("2d").getImageData(0,0,1,1); } catch { setCleanupStatus("图片不允许像素读取，请改为上传本地文件。", true); return; }
+  titleOcrUi.choices.replaceChildren(); titleOcrBusy(true); setCleanupStatus("正在加载英文文字识别；首次需要下载组件，图片在本地处理…");
+  let timeout;
+  try {
+    const cancelled = new Promise((_, reject) => { titleOcr.cancel = message => reject(new Error(message)); });
+    timeout = setTimeout(() => titleOcr.cancel?.("识别超时，请重试或手动涂抹。"), 90000);
+    const run = (async () => {
+      const library = await titleOcrLibrary();
+      if (token !== titleOcr.token) return null;
+      const worker = await library.createWorker("eng", 1, {
+        workerPath: "https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/worker.min.js",
+        corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@6.0.0",
+        langPath: "https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int",
+        logger: message => { if (token === titleOcr.token && titleOcr.busy && message.status === "recognizing text") setCleanupStatus(`正在识别图片文字… ${Math.round(message.progress * 100)}%`); },
+      });
+      if (token !== titleOcr.token) { await worker.terminate(); return null; }
+      titleOcr.worker = worker;
+      await worker.setParameters({ tessedit_pageseg_mode: "11", user_defined_dpi: "150" });
+      const first = await worker.recognize(input, {}, { text: true, blocks: true });
+      const firstLines = titleOcrWords(first.data), firstMatch = titleOcrMatch(firstLines,target);
+      if (titleOcrSimilarity(titleOcrNormal(firstMatch.map(word=>word.text).join("")),titleOcrNormal(target)) >= .8) return firstLines;
+      if (token !== titleOcr.token) return null;
+      setCleanupStatus("正在增强下半部标题对比度，尝试补充识别…");
+      const {crop,top} = titleOcrContrast(input);
+      await worker.setParameters({ tessedit_pageseg_mode: "6" });
+      const second = await worker.recognize(crop, {}, { text:true, blocks:true });
+      return [...firstLines,...titleOcrOffset(titleOcrWords(second.data),top)];
+    })();
+    const result = await Promise.race([run, cancelled]);
+    if (!result || token !== titleOcr.token) return;
+    if (poster.image !== source || revision !== workbenchImageRevision) throw new Error("图片已改变，请重新识别。");
+    const lines = result; const matched = titleOcrMatch(lines, target);
+    if (matched.length) {
+      titleOcrSelect(matched, input.width/source.width, input.height/source.height, source, revision);
+      if(titleOcrSimilarity(titleOcrNormal(matched.map(word=>word.text).join("")),titleOcrNormal(target))<.8)setCleanupStatus(controls.cleanupStatus.textContent+" 可能只识别到部分标题，请检查并补涂。");
+    }
+    else setCleanupStatus(lines.length ? "未能匹配当前 Game name。点下方识别文字来选择标题，再检查红色选区。" : "没有识别到可靠文字；花体字可继续手动涂抹。", !lines.length);
+    const seen = new Set();
+    lines.slice().sort((a,b) => (b.bbox?.y0 || 0) - (a.bbox?.y0 || 0)).filter(line=>{const key=titleOcrNormal(line.words.map(word=>word.text).join(""))+":"+Math.round((line.bbox?.y0||0)/20);if(seen.has(key))return false;seen.add(key);return true;}).slice(0,12).forEach(line => {
+      const button = document.createElement("button"); button.type = "button"; button.className = "secondary"; button.textContent = line.words.map(word => word.text.trim()).join(" ");
+      button.addEventListener("click", () => titleOcrSelect(line.words, input.width/source.width, input.height/source.height, source, revision)); titleOcrUi.choices.append(button);
+    });
+  } catch (error) {
+    if (token === titleOcr.token) setCleanupStatus(error.message || "识别失败，请重试或手动涂抹。", true);
+  } finally {
+    clearTimeout(timeout);
+    if (token === titleOcr.token) {
+      titleOcr.token++; const worker = titleOcr.worker; titleOcr.worker = null;
+      if (worker) await worker.terminate().catch(() => {});
+      titleOcr.cancel = null; titleOcrBusy(false);
+    }
+  }
+}
+titleOcrUi.detect.addEventListener("click", detectGameTitleText);
+titleOcrUi.cancel.addEventListener("click", () => titleOcr.cancel?.("已停止识别，原图未改变。"));

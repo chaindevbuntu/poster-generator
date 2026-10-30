@@ -267,10 +267,13 @@
               <output id="cleanupBrushValue" for="cleanupBrushInput">26 px</output>
             </label>
             <div class="cleanup-actions">
+              <button class="secondary compact-button" type="button" id="detectTitleText">自动选标题</button><button class="secondary compact-button" type="button" id="cancelTitleDetect" hidden>停止识别</button>
               <button class="primary compact-button" type="button" id="applyCleanup">Erase</button>
               <button class="secondary compact-button" type="button" id="clearCleanupMask">Clear</button>
               <button class="secondary compact-button" type="button" id="undoCleanup">Undo</button>
             </div>
+            <div id="detectedTextChoices" class="detected-text-choices" aria-label="识别到的文字"></div>
+            <small class="ocr-help">自动识别英文原图文字，在本地生成选区；确认后点 Erase。花体字可补涂。</small>
             <p class="source-status" id="cleanupStatus" role="status" aria-live="polite"></p>
           </div>
           </div>
@@ -309,6 +312,7 @@
                 </label>
                 <button class="primary" type="button" id="saveProducerPreset">Save</button>
               </div>
+              <small class="producer-library-help">仅保存和套用厂商名称、Logo；当前游戏颜色、位置和尺寸保持不变。</small>
               <p class="preset-status" id="producerPresetStatus" role="status" aria-live="polite"></p>
             </div>
           </details>
